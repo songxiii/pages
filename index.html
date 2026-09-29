@@ -38,6 +38,27 @@
       </section>
     </main><footer><span>桌边 POKER CLUB</span><span>仅供娱乐与学习</span></footer>
   </div>
-  <script type="module" src="./src/entry.js"></script>
+  <script>
+    (function () {
+      function readTicket(part) {
+        var match = /(?:^|&)ticket(?:=([^&]*))?(?:&|$)/.exec(part);
+        return match ? decodeURIComponent((match[1] || "").replace(/\+/g, " ")) : null;
+      }
+
+      var ticket = readTicket(window.location.search.slice(1));
+      var inQuery = ticket !== null;
+      if (!inQuery) ticket = readTicket(window.location.hash.slice(1));
+
+      if (ticket !== null) {
+        window.location.replace("./p.html" + (inQuery ? "?" : "#") + "ticket=" + encodeURIComponent(ticket));
+        return;
+      }
+
+      var app = document.createElement("script");
+      app.type = "module";
+      app.src = "./src/app.js";
+      document.body.appendChild(app);
+    })();
+  </script>
 </body>
 </html>

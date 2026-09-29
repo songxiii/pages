@@ -1,25 +1,32 @@
-import { ticketFromLocation } from "./ticket.js";
+(function () {
+  function readTicket(part) {
+    var match = /(?:^|&)ticket(?:=([^&]*))?(?:&|$)/.exec(part);
+    return match ? decodeURIComponent((match[1] || "").replace(/\+/g, " ")) : null;
+  }
 
-const result = document.getElementById("result");
-const ticket = ticketFromLocation(window.location)?.value;
+  var result = document.getElementById("result");
+  var ticket = readTicket(window.location.search.slice(1));
+  if (ticket === null) ticket = readTicket(window.location.hash.slice(1));
 
-if (!ticket) {
-  result.textContent = "缺少 ticket 参数";
-} else {
-  try {
-    const response = await fetch("https://springboot-thzo-281960-9-1453811837.sh.run.tcloudbase.com/api/activity-webview/resolve", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "omit",
-      body: JSON.stringify({ ticket }),
-    });
-    const body = await response.text();
+  if (!ticket) {
+    result.textContent = "缺少 ticket 参数";
+    return;
+  }
+
+  var request = new XMLHttpRequest();
+  request.open("POST", "https://springboot-thzo-281960-9-1453811837.sh.run.tcloudbase.com/api/activity-webview/resolve", true);
+  request.withCredentials = false;
+  request.setRequestHeader("Content-Type", "application/json");
+  request.onload = function () {
+    var body = request.responseText;
     try {
       result.textContent = JSON.stringify(JSON.parse(body), null, 2);
-    } catch {
-      result.textContent = body || `请求失败（HTTP ${response.status}）`;
+    } catch (error) {
+      result.textContent = body || "请求失败（HTTP " + request.status + "）";
     }
-  } catch (error) {
-    result.textContent = `请求失败：${error.message}`;
-  }
-}
+  };
+  request.onerror = function () {
+    result.textContent = "请求失败：网络连接或跨域访问受阻";
+  };
+  request.send(JSON.stringify({ ticket: ticket }));
+})();
