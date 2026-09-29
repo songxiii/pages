@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="我的第一个 GitHub Pages 网页" />
+    <title>我的第一个网页</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #f5f7fb;
+        color: #182235;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        min-height: 100vh;
+        margin: 0;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+
+      main {
+        width: min(100%, 640px);
+        padding: clamp(32px, 7vw, 64px);
+        border: 1px solid #e2e8f0;
+        border-radius: 24px;
+        background: #fff;
+        box-shadow: 0 16px 48px rgb(24 34 53 / 8%);
+      }
+
+      .eyebrow {
+        margin: 0 0 12px;
+        color: #2563eb;
+        font-size: 14px;
+        font-weight: 700;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0 0 16px;
+        font-size: clamp(36px, 7vw, 56px);
+        line-height: 1.15;
+      }
+
+      p {
+        margin: 0;
+        color: #526078;
+        font-size: 18px;
+        line-height: 1.7;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p class="eyebrow">GitHub Pages</p>
+      <h1>你好，世界！</h1>
+      <p>这是我的第一个网页。内容保存在本地，并通过 GitHub Pages 分享给大家。</p>
+    </main>
+  </body>
+</html>
