@@ -37,8 +37,15 @@ test("首页兼容查询参数 ticket，普通访问继续加载游戏", () => {
   assert.equal(app.src, "./src/app.js");
 });
 
-test("p.html 仅将 ticket 作为 JSON 提交，并显示错误响应内容", () => {
-  const result = { textContent: "" };
+function runPageWithResponse(responseText, status) {
+  const elements = {
+    result: { textContent: "" },
+    profile: { hidden: true },
+    avatar: { hidden: true, src: "", alt: "" },
+    "avatar-fallback": { hidden: false, textContent: "人" },
+    "user-name": { textContent: "" },
+    "activity-id": { textContent: "" },
+  };
   let request;
   class FakeRequest {
     constructor() { request = this; }
@@ -46,19 +53,38 @@ test("p.html 仅将 ticket 作为 JSON 提交，并显示错误响应内容", ()
     setRequestHeader(name, value) { this.header = [name, value]; }
     send(body) {
       this.body = body;
-      this.status = 401;
-      this.responseText = '{"code":401,"message":"链接无效"}';
+      this.status = status;
+      this.responseText = responseText;
       this.onload();
     }
   }
   runInNewContext(pageScript, {
     window: { location: { search: "", hash: "#ticket=v1.k1.test" } },
-    document: { getElementById() { return result; } },
+    document: { getElementById(id) { return elements[id]; } },
     XMLHttpRequest: FakeRequest,
   });
+  return { elements, request };
+}
+
+test("p.html 仅将 ticket 作为 JSON 提交，并显示错误响应内容", () => {
+  const { elements, request } = runPageWithResponse('{"code":401,"message":"链接无效"}', 401);
   assert.equal(request.method, "POST");
   assert.equal(request.header[0], "Content-Type");
   assert.equal(request.header[1], "application/json");
   assert.deepEqual(JSON.parse(request.body), { ticket: "v1.k1.test" });
-  assert.match(result.textContent, /链接无效/);
+  assert.match(elements.result.textContent, /链接无效/);
+  assert.equal(elements.profile.hidden, true);
+});
+
+test("p.html 显示成功响应中的头像、姓名和活动 ID", () => {
+  const response = { code: 0, data: { username: "小明", avatarUrl: "https://example.com/avatar.png", openid: "private", activityId: "A123" }, message: "success" };
+  const { elements } = runPageWithResponse(JSON.stringify(response), 200);
+  assert.equal(elements.profile.hidden, false);
+  assert.equal(elements["user-name"].textContent, "小明");
+  assert.equal(elements["activity-id"].textContent, "A123");
+  assert.equal(elements.avatar.src, "https://example.com/avatar.png");
+  elements.avatar.onload();
+  assert.equal(elements.avatar.hidden, false);
+  assert.equal(elements["avatar-fallback"].hidden, true);
+  assert.deepEqual(JSON.parse(elements.result.textContent), response);
 });
