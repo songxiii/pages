@@ -1,65 +1,43 @@
 <!doctype html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="我的第一个 GitHub Pages 网页" />
-    <title>我的第一个网页</title>
-    <style>
-      :root {
-        color-scheme: light;
-        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        background: #f5f7fb;
-        color: #182235;
-      }
-
-      * { box-sizing: border-box; }
-
-      body {
-        min-height: 100vh;
-        margin: 0;
-        display: grid;
-        place-items: center;
-        padding: 24px;
-      }
-
-      main {
-        width: min(100%, 640px);
-        padding: clamp(32px, 7vw, 64px);
-        border: 1px solid #e2e8f0;
-        border-radius: 24px;
-        background: #fff;
-        box-shadow: 0 16px 48px rgb(24 34 53 / 8%);
-      }
-
-      .eyebrow {
-        margin: 0 0 12px;
-        color: #2563eb;
-        font-size: 14px;
-        font-weight: 700;
-        letter-spacing: .08em;
-        text-transform: uppercase;
-      }
-
-      h1 {
-        margin: 0 0 16px;
-        font-size: clamp(36px, 7vw, 56px);
-        line-height: 1.15;
-      }
-
-      p {
-        margin: 0;
-        color: #526078;
-        font-size: 18px;
-        line-height: 1.7;
-      }
-    </style>
-  </head>
-  <body>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#101d1a">
+  <meta name="description" content="德州扑克网页游戏：单人挑战电脑，或通过房间码在线对战。">
+  <title>桌边 · 德州扑克</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="shell">
+    <header><a class="brand" href="./"><span class="brand-icon">♠</span><span>桌边 <small>POKER CLUB</small></span></a><span class="top-note">免费试玩 · 无需注册 · 筹码无现金价值</span></header>
     <main>
-      <p class="eyebrow">GitHub Pages</p>
-      <h1>你好，世界！</h1>
-      <p>这是我的第一个网页。内容保存在本地，并通过 GitHub Pages 分享给大家。</p>
-    </main>
-  </body>
+      <section class="hero" id="welcome">
+        <div><p class="eyebrow">● TEXAS HOLD’EM</p><h1>你的下一手好牌，<br><em>从这里开始。</em></h1><p class="intro">一张桌，两种玩法。随时和电脑练习，或邀请朋友在线入座。</p>
+          <div class="mode-grid"><button class="mode" id="solo-start"><span class="mode-symbol">♣</span><strong>单人练习</strong><small>和电脑打几局，立即开始</small><b>↗</b></button><button class="mode" id="online-open"><span class="mode-symbol">♦</span><strong>在线对战</strong><small>创建房间或输入房间码</small><b>↗</b></button></div>
+          <p class="muted">双人无限注德州扑克 · 每人 1,000 筹码 · 盲注 10 / 20</p>
+        </div><div class="hero-art" aria-hidden="true"><div class="orbit"></div><div class="art-card art-back">♠</div><div class="art-card art-ace">A<span>♠</span></div><div class="chip">100</div></div>
+      </section>
+      <section class="room-panel hidden" id="room-panel">
+        <div class="section-heading"><div><p class="eyebrow">PLAY TOGETHER</p><h2>和朋友开一桌</h2></div><button class="text-button" id="room-back">← 返回</button></div>
+        <p class="muted">两位玩家各用一台设备打开网页。创建房间后把邀请链接发给朋友。</p>
+        <div class="room-grid"><label>你的昵称<input id="player-name" maxlength="16" placeholder="例如：黑桃 A" autocomplete="nickname"></label><label>房间码<input id="room-code" maxlength="8" placeholder="输入房间码" autocapitalize="characters"></label></div>
+        <div class="button-row"><button class="primary" id="create-room">创建新房间</button><button class="secondary" id="join-room">加入房间</button></div>
+        <details class="settings" id="server-settings" open><summary>联机服务设置</summary><label>Java WebSocket 地址<input id="server-url" type="url" placeholder="wss://你的域名/ws/poker" spellcheck="false"></label><p>请填写你的 Java 服务 WebSocket 地址；此浏览器会记住它。</p></details>
+        <p class="message" id="room-message" role="status"></p>
+      </section>
+      <section class="game hidden" id="game-section">
+        <div class="section-heading"><div><p class="eyebrow" id="game-mode">SINGLE PLAYER</p><h2 id="game-title">单人练习</h2></div><div class="heading-right"><span id="connection-status"></span><button class="text-button" id="leave-game">退出牌桌</button></div></div>
+        <div class="invite hidden" id="invite">房间码 <strong id="invite-code"></strong><button class="secondary small" id="copy-invite">复制邀请链接</button></div>
+        <div class="table-frame"><div class="felt">
+          <div class="seat opponent"><span class="avatar" id="opponent-avatar">?</span><span class="seat-meta"><span><strong id="opponent-name">对手</strong> <i class="dealer hidden" id="opponent-dealer">D</i></span><small id="opponent-stack">1,000 筹码</small></span><span class="hand" id="opponent-cards"></span></div>
+          <div class="table-middle"><div class="pot">底池 <strong id="pot-amount">0</strong></div><div class="board" id="board-cards"></div><div class="phase" id="phase-label">等待发牌</div></div>
+          <div class="seat self"><span class="avatar self-avatar" id="player-avatar">你</span><span class="seat-meta"><span><strong id="player-label">你</strong> <i class="dealer hidden" id="player-dealer">D</i></span><small id="player-stack">1,000 筹码</small></span><span class="hand" id="player-cards"></span></div>
+        </div></div>
+        <div class="game-bottom"><div class="panel"><p class="eyebrow">牌局动态</p><h3 id="status-title">准备开始</h3><p id="status-detail"></p><ol class="log" id="game-log"></ol></div><div class="panel"><p class="eyebrow">你的操作</p><div class="controls" id="controls"></div><p class="error" id="action-error" role="alert"></p></div></div>
+      </section>
+    </main><footer><span>桌边 POKER CLUB</span><span>仅供娱乐与学习</span></footer>
+  </div>
+  <script type="module" src="./src/app.js"></script>
+</body>
 </html>
