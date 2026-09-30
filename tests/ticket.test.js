@@ -23,19 +23,18 @@ test("首页将 hash ticket 转到 p.html，保留在 hash 中", () => {
   assert.equal(destination, "./p.html#ticket=v1.k1.test-value");
 });
 
-test("首页将查询参数 ticket 转入 fragment，普通访问继续加载游戏", () => {
+test("首页将查询参数 ticket 转入 fragment，普通访问保留欢迎页", () => {
   let destination;
-  let app;
   const document = {
-    createElement() { return {}; },
-    body: { appendChild(script) { app = script; } },
+    createElement() { throw new Error("欢迎页不应加载游戏脚本"); },
   };
   const location = { search: "?ticket=v1.k1.query", hash: "", replace(url) { destination = url; } };
   runInNewContext(entryScript, { window: { location }, document });
   assert.equal(destination, "./p.html#ticket=v1.k1.query");
   location.search = "";
+  destination = undefined;
   runInNewContext(entryScript, { window: { location }, document });
-  assert.equal(app.src, "./src/app.js");
+  assert.equal(destination, undefined);
 });
 
 test("活动页面提供身份、创建、等待、房间和连接视图", () => {
