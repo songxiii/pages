@@ -27,7 +27,11 @@ GitHub 项目调研见 [docs/RESEARCH.md](docs/RESEARCH.md)。
 
 ## 活动专属入口
 
-`p.html#ticket=...` 打开后立即调用 `POST /api/poker/v1/entry`。若当前标签页已有 access token，会自动用于身份验证；否则接口返回 401 后提示输入与 ticket 本人一致的 Bearer token。输入的 token 仅缓存在当前标签页的 `sessionStorage` 中，刷新后可再次自动验证。普通成员在房间未创建时看到联系创建人的提示，活动创建人可以选择固定配置并调用 `POST /api/poker/v1/rooms` 建房。已有房间时页面显示房间信息、成员与 `connection.url`，并可用返回的短期 `wsToken` 手动建立 WebSocket 连接。页面顶部显示静态页面版本以及 HTTP/WS 响应顶层的 `systemVersion`；调试区展示脱敏的最近一次请求和响应。ticket 保留在 URL fragment 中，旧的 `?ticket=...` 链接会转成 fragment。
+`p.html#ticket=...` 打开后立即调用 `POST /api/poker/v1/entry`，已有当前账号 access token 时自动附带 Bearer 认证。页面提供三种视图：校验失败/普通成员等待开房时显示对应简单提示；活动创建人通过六项下拉配置调用 `POST /api/poker/v1/rooms`；已有房间时自动连接 WebSocket，认证后渲染当前牌局。牌桌支持 2–9 个座位、本人底牌、公共牌、下注筹码、底池、回合倒计时、发牌与翻牌动画、快捷加注和服务端授权的入座/准备/开局按钮。
+
+房间资料和版本在菜单中，技术调试区仅在 `?debug=1` 时显示。开发联调可在调试区填写 token；正常入口由宿主/登录页交接当前账号登录态。ticket 保留在 fragment，旧的 query 链接自动转换。
+
+**Java 所需字段和消息见 [活动牌桌接口对接说明](docs/ACTIVITY_POKER_API.md)**。新增牌局快照和操作命令已通过模拟服务验证，仍需真实 Java 联调；这个活动 v1 的大写协议与首页演示协议分开。
 
 API 域名配置在 [src/poker-config.js](src/poker-config.js)。如果页面与 Java 服务不同源，服务端需要把页面的精确 HTTPS Origin 配置到 `POKER_ALLOWED_ORIGINS`，并设置 `POKER_WS_PUBLIC_URL`。小程序或宿主应用需把 ticket 放在 URL fragment 中；access token 不应放进 URL。
 

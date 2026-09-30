@@ -1,3 +1,4 @@
+import { createPokerTable } from "./poker-table.js";
 import { POKER_API_BASE_URL } from "./poker-config.js";
 import { ticketFromLocation, ticketFragmentUrl, validateSettings, redactCredentials, normalizeWebSocketUrl } from "./poker-entry.js";
 
@@ -17,7 +18,16 @@ let connection = null;
 let socket = null;
 let socketEpoch = 0;
 let pingTimer = null;
+let handshakeTimer = null;
 let busy = false;
+let reconnectTimer = null;
+let reconnectAttempts = 0;
+const table = createPokerTable({ document,
+  onAction: (action, amount) => sendCommand("ACTION", { action, ...(amount == null ? {} : { amount }), handId: view?.game?.handId ?? view?.game?.handNumber, expectedRevision: view?.revision }),
+  onCommand: sendCommand,
+});
+const debug = new URLSearchParams(window.location.search).get("debug") === "1";
+$("debug-panel").hidden = !debug;
 
 function readStoredToken() {
   try { return sessionStorage.getItem(tokenStorageKey) || ""; }
@@ -34,8 +44,15 @@ function message(value, error = false) {
   text("message", value);
   $("message").className = "message" + (error ? " error" : "");
 }
-function setWsStatus(value) { text("ws-status", value); }
+function setWsStatus(value) {
+  text("ws-status", value);
+  $("ws-status").setAttribute("data-connected", String(value === "已连接"));
+}
 function showPanel(id) {
+  $("loading-panel").hidden = true;
+  document.body.classList.toggle("room-mode", id === "room-panel");
+  $("room-menu").hidden = id !== "room-panel";
+  if (id !== "room-panel") $("room-details").hidden = true;
   for (const panel of ["login-panel", "waiting-panel", "create-panel", "closed-panel", "error-panel", "room-panel", "connection-panel"]) {
     $(panel).hidden = panel !== id && !(id === "room-panel" && panel === "connection-panel");
   }
@@ -99,6 +116,10 @@ async function post(path, requestBody) {
 function clearSocket() {
   socketEpoch++;
   clearInterval(pingTimer);
+  clearTimeout(handshakeTimer);
+  clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+  table.setConnected(false);
   pingTimer = null;
   if (socket) {
     const old = socket;
@@ -106,38 +127,50 @@ function clearSocket() {
     old.close();
   }
 }
-function returnToLogin() {
+function returnToLogin(detail = "请返回活动入口，登录后重新打开。") {
   clearSocket();
   accessToken = "";
   storeToken("");
   $("access-token").value = "";
   $("activity-panel").hidden = true;
+  text("login-detail", detail);
+  view = null; connection = null; table.reset();
+  message(""); setWsStatus("待验证");
   showPanel("login-panel");
 }
-async function enterRoom() {
+async function enterRoom(autoConnect = true) {
+  let success = false;
   if (busy || !ticket) {
     if (!ticket) message("活动链接缺少 ticket，请从活动入口重新打开。", true);
     return false;
   }
   setBusy(true);
+  table.setConnected(false);
   message("正在校验身份与活动资格…");
   try {
     const data = await post("/api/poker/v1/entry", { ticket });
     applyView(data);
     message("");
+    success = true;
     return true;
   } catch (error) {
     message(error.message, true);
     if (error.status === 401 || error.status === 403 || error.code === 401 || error.code === 403) {
-      returnToLogin();
-    } else if (!view) {
-      text("error-detail", error.message);
-      showPanel("error-panel");
+      if (error.status === 401 || error.code === 401) returnToLogin(error.message);
+      else showEntryError(error.message, "无权进入本场活动");
+    } else {
+      showEntryError(error.message);
     }
     return false;
   } finally {
     setBusy(false);
+    if (success && autoConnect && connection) await connectWebSocket();
   }
+}
+function showEntryError(detail, title = "暂时无法进入") {
+  clearSocket(); table.reset(); view = null; connection = null;
+  text("error-title", title); text("error-detail", detail);
+  message(""); showPanel("error-panel"); setWsStatus("无法进入");
 }
 async function createRoom(event) {
   event.preventDefault();
@@ -146,16 +179,19 @@ async function createRoom(event) {
   try { settings = validateSettings(Object.fromEntries(new FormData($("create-form")))); }
   catch (error) { text("settings-error", error.message); return; }
   text("settings-error", "");
+  let success = false;
   setBusy(true);
   message("正在创建房间…");
   try {
     const data = await post("/api/poker/v1/rooms", { ticket, settings });
     applyView(data);
-    message(data.created ? "房间已创建，你已自动加入并处于旁观状态。" : "房间已存在，已进入原房间。");
+    success = true;
+    message("");
   } catch (error) {
     message(error.message, true);
     if (error.status === 401 || error.status === 403 || error.code === 401 || error.code === 403) {
-      returnToLogin();
+      if (error.status === 401 || error.code === 401) returnToLogin(error.message);
+      else showEntryError(error.message, "无权创建房间");
     } else if (error.status === 409 || error.code === 409) {
       // A concurrent creator request may already have created the room.
       setBusy(false);
@@ -163,11 +199,13 @@ async function createRoom(event) {
     }
   } finally {
     setBusy(false);
+    if (success && connection) await connectWebSocket();
   }
 }
 function applyView(data) {
   view = data;
-  $("activity-panel").hidden = false;
+  $("activity-panel").hidden = !data.canCreate;
+  text("page-title", data.activity?.title || "桌边");
   const activity = data.activity || {};
   const self = data.self || {};
   const counts = data.counts || {};
@@ -177,12 +215,16 @@ function applyView(data) {
   text("self-name", self.nickname || "活动成员");
   text("self-role", self.role === "CREATOR" ? "活动创建人" : "活动成员");
   text("activity-count", number(counts.activityParticipantCount));
+  if (!["ROOM_READY", "ROOM_CREATED"].includes(data.entryState)) {
+    clearSocket(); connection = null; table.reset();
+    setWsStatus(data.canCreate ? "待开房" : "活动入口");
+  }
   switch (data.entryState) {
     case "READY_TO_CREATE":
       showPanel(data.canCreate ? "create-panel" : "waiting-panel");
       break;
     case "WAITING_FOR_CREATOR":
-      showPanel("waiting-panel");
+      showPanel(data.canCreate ? "create-panel" : "waiting-panel");
       break;
     case "ROOM_CLOSED":
       clearSocket();
@@ -192,10 +234,12 @@ function applyView(data) {
     case "ROOM_CREATED":
       showPanel("room-panel");
       renderRoom();
+      if (!connection?.url || !connection?.wsToken) {
+        setWsStatus("未连接"); table.setConnected(false, "房间连接信息不完整，请打开菜单重新检查。");
+      }
       break;
     default:
-      message(data.notice || "暂时无法进入房间。", true);
-      showPanel("waiting-panel");
+      showEntryError(data.notice || "活动信息无法识别，请从活动入口重新打开。");
   }
 }
 function addDefinition(parent, label, value) {
@@ -248,7 +292,8 @@ function renderRoom() {
     element.append(name, detail);
     people.append(element);
   }
-  connection = view.connection || connection;
+  table.render(view);
+  connection = view.connection || null;
   let wsUrl = connection?.url;
   try { if (wsUrl) wsUrl = normalizeWebSocketUrl(wsUrl, apiBase); }
   catch { /* Keep invalid server URLs visible for diagnosis. */ }
@@ -265,15 +310,21 @@ function requestId() {
   const hex = Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
   return [hex.slice(0, 8), hex.slice(8, 12), hex.slice(12, 16), hex.slice(16, 20), hex.slice(20)].join("-");
 }
+function sendCommand(type, payload) {
+  if (!socket || socket.readyState !== WebSocket.OPEN || $("ws-status").textContent !== "已连接") {
+    table.reject("连接已断开，请重新连接后操作。"); return;
+  }
+  socket.send(JSON.stringify({ type, requestId: requestId(), payload }));
+}
 async function connectWebSocket() {
   if (busy || !connection?.url) return;
   const expiresAt = Date.parse(connection.expiresAt);
   if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
-    if (!await enterRoom()) return;
+    if (!await enterRoom(false)) return;
   }
   if (!["ROOM_READY", "ROOM_CREATED"].includes(view?.entryState)
       || !connection?.url || !connection?.wsToken) return;
-  if (Date.parse(connection.expiresAt) <= Date.now()) {
+  if (!Number.isFinite(Date.parse(connection.expiresAt)) || Date.parse(connection.expiresAt) <= Date.now()) {
     setWsStatus("凭证已过期");
     text("ws-detail", "服务端返回的连接凭证已过期，请重新请求主入口。");
     return;
@@ -292,6 +343,9 @@ async function connectWebSocket() {
   }
   const epoch = ++socketEpoch;
   let failure = "";
+  let authenticated = false;
+  let lastRevision = -1;
+  let lastMessageAt = Date.now();
   setWsStatus("正在连接");
   text("ws-detail", "正在连接 " + url.href);
   try { socket = new WebSocket(url.href); }
@@ -301,6 +355,11 @@ async function connectWebSocket() {
     return;
   }
   const current = socket;
+  handshakeTimer = setTimeout(() => {
+    if (epoch !== socketEpoch) return;
+    failure = "连接或认证超时，请稍后重试。";
+    table.setConnected(false, failure); current.close(4001, "AUTH_TIMEOUT");
+  }, 15000);
   current.onopen = () => {
     if (epoch !== socketEpoch) return;
     setWsStatus("正在认证");
@@ -312,39 +371,73 @@ async function connectWebSocket() {
     if (epoch !== socketEpoch) return;
     let frame;
     try { frame = JSON.parse(event.data); } catch { return; }
+    if (!frame || typeof frame !== "object" || typeof frame.type !== "string") return;
+    lastMessageAt = Date.now();
     if (frame.systemVersion) updateSystemVersion(frame.systemVersion);
     if (frame.type === "AUTH_OK") {
+      authenticated = true;
+      clearTimeout(handshakeTimer);
+      handshakeTimer = setTimeout(() => {
+        if (epoch !== socketEpoch) return;
+        failure = "服务端尚未推送牌局状态，请稍后重试。";
+        table.setConnected(false, failure); current.close(4001, "SNAPSHOT_TIMEOUT");
+      }, 15000);
       setWsStatus("已连接");
+      table.setConnected(false, "房间已连接，等待牌局同步…");
       text("ws-detail", "认证成功，正在同步房间状态。");
       clearInterval(pingTimer);
       pingTimer = setInterval(() => {
+        if (Date.now() - lastMessageAt > 60000) { current.close(4001, "HEARTBEAT_TIMEOUT"); return; }
         if (current.readyState === WebSocket.OPEN) current.send(JSON.stringify({
           type: "PING", requestId: requestId(), payload: { clientTime: new Date().toISOString() },
         }));
       }, 20000);
-    } else if (frame.type === "SNAPSHOT" && frame.payload) {
-      view = { ...view, ...frame.payload, connection };
+    } else if (frame.type === "SNAPSHOT" && frame.payload && authenticated) {
+      clearTimeout(handshakeTimer);
+      const revision = frame.payload.revision;
+      if (Number.isFinite(revision) && revision <= lastRevision) return;
+      if (Number.isFinite(revision)) lastRevision = revision;
+      view = { ...view, ...frame.payload, self: { ...view.self, ...frame.payload.self }, room: { ...view.room, ...frame.payload.room }, connection };
+      if (view.entryState === "ROOM_CLOSED" || view.room?.status === "CLOSED") {
+        clearSocket(); table.reset(); connection = null; showPanel("closed-panel"); return;
+      }
+      reconnectAttempts = 0;
+      message("");
+      table.setConnected(true);
       renderRoom();
+    } else if (frame.type === "ROOM_CLOSED" && authenticated) {
+      clearSocket(); table.reset(); connection = null; showPanel("closed-panel");
     } else if (frame.type === "ERROR" || frame.type === "AUTH_EXPIRED") {
-      failure = frame.payload?.message || "WebSocket 连接失败";
-      message(failure, true);
-      text("ws-detail", failure);
-      setWsStatus("连接错误");
+      const detail = frame.payload?.message || "操作未完成，请稍后重试";
+      table.reject(detail);
+      message(detail, true);
+      if (frame.type === "AUTH_EXPIRED" || !authenticated) {
+        failure = detail; authenticated = false;
+        table.setConnected(false, detail);
+        text("ws-detail", failure); setWsStatus("连接错误");
+      }
     }
   };
   current.onerror = () => {
     if (epoch !== socketEpoch) return;
     failure = "连接失败，请检查服务端公网 WSS 地址、TLS 和允许的 Origin。";
+    table.setConnected(false, "连接失败，请打开房间菜单重新连接。");
     setWsStatus("连接失败");
     text("ws-detail", failure);
   };
   current.onclose = (event) => {
     if (epoch !== socketEpoch) return;
     clearInterval(pingTimer);
+    clearTimeout(handshakeTimer);
     pingTimer = null;
     socket = null;
+    table.setConnected(false, "连接已断开，正在尝试恢复…");
     setWsStatus(failure ? "连接错误" : "已断开");
     text("ws-detail", [failure, "连接已关闭（" + event.code + "）", event.reason].filter(Boolean).join(" · "));
+    if (event.code !== 1000 && event.code !== 4003 && reconnectAttempts < 3) {
+      const delay = [1500, 3000, 6000][reconnectAttempts++];
+      reconnectTimer = setTimeout(() => { if (epoch === socketEpoch) enterRoom(); }, delay);
+    } else table.setConnected(false, "连接已断开，请打开房间菜单重新连接。");
   };
 }
 
@@ -355,6 +448,22 @@ $("login-form").addEventListener("submit", (event) => {
   enterRoom();
 });
 $("create-form").addEventListener("submit", createRoom);
+$("create-form").addEventListener("change", (event) => {
+  const form = $("create-form"), small = form.elements.smallBlind, big = form.elements.bigBlind, stack = form.elements.startingStack;
+  if (event.target === small) big.value = String(Number(small.value) * 2);
+  for (const option of big.options) option.disabled = Number(option.value) < Number(small.value);
+  if (Number(big.value) < Number(small.value)) big.value = String(Number(small.value) * 2);
+  for (const option of stack.options) option.disabled = Number(option.value) < Number(big.value) * 20;
+  if (Number(stack.value) < Number(big.value) * 20) stack.value = [...stack.options].find((option) => !option.disabled).value;
+});
+function toggleDrawer(id, button, open) { $(id).hidden = !open; $(button).setAttribute("aria-expanded", String(open)); }
+$("room-menu").addEventListener("click", () => toggleDrawer("room-details", "room-menu", $("room-details").hidden));
+$("close-details").addEventListener("click", () => toggleDrawer("room-details", "room-menu", false));
+$("help-button").addEventListener("click", () => toggleDrawer("help-panel", "help-button", $("help-panel").hidden));
+$("close-help").addEventListener("click", () => toggleDrawer("help-panel", "help-button", false));
+document.addEventListener("keydown", (event) => { if (event.key === "Escape") { toggleDrawer("room-details", "room-menu", false); toggleDrawer("help-panel", "help-button", false); } });
+$("refresh-room").addEventListener("click", enterRoom);
+$("retry-login").addEventListener("click", enterRoom);
 $("refresh-entry").addEventListener("click", enterRoom);
 $("retry-entry").addEventListener("click", enterRoom);
 $("connect-ws").addEventListener("click", connectWebSocket);
@@ -365,8 +474,6 @@ $("copy-ws-url").addEventListener("click", async () => {
 });
 if (ticket) enterRoom();
 else {
-  message("活动链接缺少 ticket，请从活动入口重新打开。", true);
-  text("error-detail", "当前链接没有 ticket，无法验证活动身份。");
+  showEntryError("活动链接不完整，请从活动入口重新打开。", "活动链接无效");
   $("retry-entry").hidden = true;
-  showPanel("error-panel");
 }

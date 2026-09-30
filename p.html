@@ -2,76 +2,68 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="referrer" content="no-referrer">
-  <meta name="theme-color" content="#111b17">
-  <title>活动扑克房间</title>
+  <meta name="theme-color" content="#0d111b">
+  <title>桌边 · 活动牌局</title>
   <link rel="stylesheet" href="./p.css">
 </head>
 <body>
   <main class="page">
     <header class="page-head">
-      <div><span class="overline">ACTIVITY POKER</span><h1>活动扑克房间</h1></div>
-      <div class="versions"><span>页面版本 <time id="page-version" datetime="2026-09-30T20:41:55+08:00">2026-09-30 20:41:55</time></span><span>服务版本 <strong id="system-version">等待响应</strong></span></div>
+      <button id="room-menu" class="icon-button" type="button" aria-label="房间信息" aria-expanded="false" aria-controls="room-details">☰</button>
+      <div class="brand"><span class="brand-mark">♠</span><div><strong id="page-title">桌边</strong><small id="page-subtitle">活动专属牌局</small></div></div>
+      <span id="ws-status" class="connection-status">验证中</span>
+      <button id="help-button" class="icon-button" type="button" aria-label="玩法说明" aria-expanded="false" aria-controls="help-panel">?</button>
     </header>
-
     <div id="message" class="message" role="status" aria-live="polite"></div>
 
-    <section id="login-panel" class="panel" hidden aria-labelledby="login-title">
-      <span class="overline">IDENTITY</span><h2 id="login-title">验证当前账号</h2>
-      <p>主入口要求与活动链接本人一致的 Bearer access token。</p>
-      <form id="login-form"><label for="access-token">Access token</label><input id="access-token" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="粘贴当前账号的 access token"><button type="submit">验证并进入</button></form>
-    </section>
+    <section id="loading-panel" class="state-panel" aria-label="正在验证"><span class="state-icon loading-icon">♠</span><h1>正在进入牌局</h1><p>正在验证活动信息，请稍候…</p></section>
+    <section id="login-panel" class="state-panel" hidden aria-labelledby="login-title"><span class="state-icon">♙</span><h1 id="login-title">账号验证失败</h1><p id="login-detail">请返回活动入口，登录后重新打开。</p><button id="retry-login" class="secondary" type="button">重新检查</button></section>
+    <section id="waiting-panel" class="state-panel" hidden aria-labelledby="waiting-title"><span class="state-icon">◷</span><h1 id="waiting-title">房间还没有开</h1><p>请等待活动创建人开房，稍后再来看看。</p><button id="refresh-entry" class="secondary" type="button">刷新房间状态</button></section>
+    <section id="closed-panel" class="state-panel" hidden><span class="state-icon">♠</span><h1>本场牌局已结束</h1><p>房间已关闭，请返回活动查看其他安排。</p></section>
+    <section id="error-panel" class="state-panel" hidden><span class="state-icon">!</span><h1 id="error-title">暂时无法进入</h1><p id="error-detail">请稍后重试。</p><button id="retry-entry" class="secondary" type="button">重新检查</button></section>
 
-    <section id="activity-panel" class="panel" hidden aria-labelledby="activity-title">
-      <div class="section-head"><div><span class="overline">ACTIVITY</span><h2 id="activity-title">活动</h2><span id="activity-id" class="muted"></span></div><span id="activity-status" class="pill">—</span></div>
-      <div class="summary-grid"><div><small>当前用户</small><strong id="self-name">—</strong></div><div><small>活动身份</small><strong id="self-role">—</strong></div><div><small>活动成员</small><strong id="activity-count">—</strong></div></div>
-    </section>
-
-    <section id="waiting-panel" class="panel state-panel" hidden aria-labelledby="waiting-title">
-      <span class="state-icon">◷</span><span class="overline">WAITING</span><h2 id="waiting-title">房间尚未创建</h2>
-      <p>请联系活动创建人创建房间。创建完成后，点击下方按钮重新检查。</p>
-      <button id="refresh-entry" type="button" class="secondary">刷新房间状态</button>
-    </section>
-
-    <section id="create-panel" class="panel" hidden aria-labelledby="create-title">
-      <span class="overline">CREATOR / CREATE ROOM</span><h2 id="create-title">创建活动房间</h2>
-      <p>你是活动创建人。房间配置在创建后固定，创建成功会自动加入并处于旁观状态。</p>
+    <section id="create-panel" class="create-panel" hidden aria-labelledby="create-title">
+      <div class="create-heading"><span class="overline">A SEAT AT THE TABLE</span><h1 id="create-title">开一桌好牌</h1><p>你是活动创建人，选好配置即可邀请大家入座。</p></div>
+      <section id="activity-panel" class="activity-strip" hidden><div><strong id="activity-title">活动</strong><small id="activity-id"></small></div><span id="activity-status" class="pill"></span><div class="activity-meta"><span id="self-name"></span><span id="self-role"></span><span>成员 <b id="activity-count">0</b> 人</span></div></section>
       <form id="create-form">
         <div class="settings-grid">
-          <label>座位上限<input name="maxSeats" type="number" min="2" max="9" step="1" value="6" required></label>
-          <label>落座方式<select name="seatingType"><option value="0">随机落座</option><option value="1">自主选座</option></select></label>
-          <label>小盲注<input name="smallBlind" type="number" min="1" step="1" value="10" required></label>
-          <label>大盲注<input name="bigBlind" type="number" min="1" step="1" value="20" required></label>
-          <label>初始筹码<input name="startingStack" type="number" min="20" step="1" value="1000" required></label>
-          <label>行动时限（秒）<input name="turnSeconds" type="number" min="10" max="120" step="1" value="30" required></label>
+          <label>座位人数<select name="maxSeats"><option value="2">2 人</option><option value="3">3 人</option><option value="4">4 人</option><option value="5">5 人</option><option value="6" selected>6 人</option><option value="7">7 人</option><option value="8">8 人</option><option value="9">9 人</option></select></label>
+          <label>入座方式<select name="seatingType"><option value="0">随机落座</option><option value="1">自主选座</option></select></label>
+          <label>小盲注<select name="smallBlind"><option>1</option><option>2</option><option>5</option><option selected>10</option><option>25</option><option>50</option></select></label>
+          <label>大盲注<select name="bigBlind"><option>2</option><option>4</option><option>10</option><option selected>20</option><option>50</option><option>100</option></select></label>
+          <label>初始筹码<select name="startingStack"><option>200</option><option>500</option><option selected>1000</option><option>2000</option><option>5000</option><option>10000</option><option>20000</option></select></label>
+          <label>每次行动时间<select name="turnSeconds"><option value="15">15 秒</option><option value="20">20 秒</option><option value="30" selected>30 秒</option><option value="45">45 秒</option><option value="60">60 秒</option><option value="90">90 秒</option><option value="120">120 秒</option></select></label>
         </div>
-        <div class="actions"><button id="create-room" type="submit">创建并进入房间</button><span id="settings-error" role="alert"></span></div>
+        <div class="create-note"><span>♧</span><p>创建后配置固定。你会先以旁观身份进入，再入座参与牌局。</p></div>
+        <p id="settings-error" role="alert"></p><button id="create-room" class="primary wide" type="submit">创建并进入房间 <span>→</span></button>
       </form>
     </section>
 
-    <section id="closed-panel" class="panel state-panel" hidden><span class="state-icon">♠</span><h2>房间已关闭</h2><p>本场活动房间已结束。</p></section>
-    <section id="error-panel" class="panel state-panel" hidden><span class="state-icon">!</span><h2>暂时无法进入</h2><p id="error-detail">请稍后重试。</p><button id="retry-entry" type="button" class="secondary">重新请求主入口</button></section>
-
-    <section id="room-panel" class="panel" hidden aria-labelledby="room-title">
-      <div class="section-head"><div><span class="overline">ROOM READY</span><h2 id="room-title">活动房间</h2><span id="room-id" class="muted"></span></div><span id="room-status" class="pill">—</span></div>
-      <div class="summary-grid room-summary"><div><small>房间成员</small><strong id="room-member-count">0</strong></div><div><small>在线</small><strong id="online-count">0</strong></div><div><small>已入座</small><strong id="seated-count">0</strong></div><div><small>你的状态</small><strong id="self-state">旁观中</strong></div></div>
-      <h3>房间配置</h3><dl id="room-settings" class="settings-list"></dl>
-      <h3>房间成员</h3><div id="members-list" class="members-list"></div>
+    <section id="room-panel" class="table-panel" hidden aria-label="当前牌局">
+      <div class="table-stage" id="table-stage">
+        <div class="table-rail"><div class="table-felt"></div></div>
+        <div class="table-center"><span class="table-wordmark">♠ 桌边</span><span id="table-blinds" class="table-blinds">NLHE</span><div id="board-cards" class="board-cards" aria-label="公共牌"></div><div class="pot-box"><small>底池</small><strong id="table-pot">0</strong></div><p id="table-phase" class="table-phase">等待牌局同步</p><p id="table-result" class="table-result" role="status"></p></div>
+        <div id="table-seats" class="table-seats"></div><div id="deal-layer" class="deal-layer" aria-hidden="true"></div>
+      </div>
+      <div id="table-notice" class="table-notice" role="status">正在连接房间…</div>
+      <div id="lobby-controls" class="lobby-controls" hidden><label id="seat-picker-label">选择座位<select id="seat-picker" aria-label="选择座位"></select></label><button id="sit-down" class="secondary" type="button">入座</button><button id="ready-player" class="secondary" type="button">准备</button><button id="stand-up" class="secondary" type="button">起身</button><button id="start-hand" class="primary" type="button">开始牌局</button></div>
+      <div class="action-dock">
+        <div id="raise-presets" class="raise-presets" aria-label="快捷加注"></div>
+        <div class="action-main"><button id="fold-action" class="table-action" type="button" disabled>弃牌</button><button id="call-action" class="table-action" type="button" disabled>过牌</button><button id="raise-toggle" class="table-action gold-action" type="button" aria-expanded="false" aria-controls="raise-editor" disabled>加注</button></div>
+        <form id="raise-editor" class="raise-editor" hidden><label>本轮总下注 <output id="raise-value"></output><input id="raise-range" type="range" min="0" max="0" step="1"></label><div><button id="all-in-action" class="secondary" type="button">全下</button><button id="confirm-raise" class="primary" type="submit">确认加注</button></div></form>
+      </div>
     </section>
 
-    <section id="connection-panel" class="panel" hidden aria-labelledby="connection-title">
-      <div class="section-head"><div><span class="overline">REALTIME</span><h2 id="connection-title">WebSocket 连接</h2></div><span id="ws-status" class="pill">未连接</span></div>
-      <div class="connection-url"><code id="ws-url"></code><button id="copy-ws-url" type="button" class="secondary">复制链接</button></div>
-      <div class="connection-info"><span>协议版本 <strong id="protocol-version">—</strong></span><span>连接凭证有效至 <strong id="ws-expires">—</strong></span></div>
-      <button id="connect-ws" type="button">连接 WebSocket</button>
-      <p id="ws-detail" class="muted" role="status" aria-live="polite"></p>
-    </section>
-
-    <details id="debug-panel" class="panel debug-panel">
-      <summary>接口请求与响应</summary>
-      <div class="debug-grid"><div><h3 id="debug-endpoint">请求接口</h3><pre id="debug-request">尚未请求</pre></div><div><h3 id="debug-response-title">返回内容</h3><pre id="debug-response">尚未返回</pre></div></div>
-    </details>
+    <aside id="room-details" class="room-details" hidden aria-label="房间详情">
+      <div class="section-head"><h2 id="room-title">活动房间</h2><button id="close-details" class="icon-button" type="button" aria-label="关闭房间信息">×</button></div><span id="room-id" class="muted"></span><span id="room-status" class="pill"></span>
+      <div class="summary-grid"><div><small>成员</small><strong id="room-member-count">0</strong></div><div><small>在线</small><strong id="online-count">0</strong></div><div><small>入座</small><strong id="seated-count">0</strong></div><div><small>你的状态</small><strong id="self-state">旁观中</strong></div></div><h3>房间配置</h3><dl id="room-settings" class="settings-list"></dl><h3>房间成员</h3><div id="members-list" class="members-list"></div>
+      <section id="connection-panel" hidden><h3>连接状态</h3><p id="ws-detail" class="muted" role="status"></p><button id="connect-ws" class="secondary" type="button">重新连接</button> <button id="refresh-room" class="secondary" type="button">重新检查房间</button></section>
+      <div class="versions"><span>页面版本 <time id="page-version" datetime="2026-09-30T21:30:00+08:00">2026-09-30 21:30:00</time></span><span>服务版本 <strong id="system-version">等待响应</strong></span></div>
+    </aside>
+    <aside id="help-panel" class="help-panel" hidden><div class="section-head"><h2>牌桌说明</h2><button id="close-help" class="icon-button" type="button" aria-label="关闭说明">×</button></div><p>每人两张底牌，配合五张公共牌组成最好的五张牌。金色 D 是庄家按钮，亮起的头像表示当前行动玩家。</p><p>轮到你时，可弃牌、过牌或跟注，也可加注。加注金额表示本轮总下注，快捷加注按底池比例计算。旁观者可以观看牌局，入座并准备后由创建人开局。</p></aside>
+    <details id="debug-panel" class="debug-panel" hidden><summary>接口调试</summary><form id="login-form"><label for="access-token">联调 Access token</label><input id="access-token" type="password" autocomplete="off" placeholder="当前账号的 access token"><button class="secondary" type="submit">验证并进入</button></form><div class="versions"><span>协议 <strong id="protocol-version">—</strong></span><span>凭证有效至 <strong id="ws-expires">—</strong></span></div><div class="connection-url"><code id="ws-url"></code><button id="copy-ws-url" class="secondary" type="button">复制地址</button></div><h3 id="debug-endpoint">请求接口</h3><pre id="debug-request"></pre><h3>响应</h3><pre id="debug-response"></pre></details>
   </main>
   <script type="module" src="./src/p.js"></script>
 </body>

@@ -5,12 +5,17 @@ import { runInNewContext } from "node:vm";
 import { webcrypto } from "node:crypto";
 import { ticketFromLocation, ticketFragmentUrl, validateSettings, redactCredentials, normalizeWebSocketUrl } from "../src/poker-entry.js";
 
-const script = readFileSync(new URL("../src/p.js", import.meta.url), "utf8").replace(/^import .*;\n/gm, "");
+const tableScript = readFileSync(new URL("../src/poker-table.js", import.meta.url), "utf8").replace(/^export /gm, "");
+const script = tableScript + "\n" + readFileSync(new URL("../src/p.js", import.meta.url), "utf8").replace(/^import .*;\n/gm, "");
 
 function element() {
   return {
     value: "", textContent: "", hidden: true, disabled: false, className: "", children: [],
-    listeners: {},
+    listeners: {}, attributes: {}, clientWidth: 400, clientHeight: 650,
+    style: { setProperty() {} },
+    classList: { toggle() {} },
+    setAttribute(name, value) { this.attributes[name] = value; },
+    remove() { this.removed = true; },
     addEventListener(type, handler) { this.listeners[type] = handler; },
     querySelector() { return this.submitButton ||= element(); },
     replaceChildren(...items) { this.children = items; },
@@ -19,13 +24,8 @@ function element() {
 }
 
 function mount(responses, initialToken = "", options = {}) {
-  const ids = ["message", "system-version", "login-panel", "waiting-panel", "create-panel",
-    "closed-panel", "error-panel", "error-detail", "room-panel", "connection-panel", "login-form", "access-token", "create-form",
-    "create-room", "refresh-entry", "retry-entry", "connect-ws", "copy-ws-url", "settings-error", "activity-panel",
-    "activity-title", "activity-id", "activity-status", "self-name", "self-role", "activity-count",
-    "room-title", "room-id", "room-status", "room-member-count", "online-count", "seated-count",
-    "self-state", "room-settings", "members-list", "ws-url", "protocol-version", "ws-expires",
-    "ws-status", "ws-detail", "debug-endpoint", "debug-request", "debug-response"];
+  const page = readFileSync(new URL("../p.html", import.meta.url), "utf8");
+  const ids = [...page.matchAll(/id="([^"]+)"/g)].map((match) => match[1]);
   const elements = Object.fromEntries(ids.map((id) => [id, element()]));
   const calls = [];
   const sockets = [];
@@ -51,7 +51,7 @@ function mount(responses, initialToken = "", options = {}) {
     window: { location: { href: "https://example.com/p.html#ticket=v1.k1.test", protocol: "https:", search: "", hash: "#ticket=v1.k1.test" } },
     WebSocket: FakeWebSocket, crypto: webcrypto,
     navigator: { clipboard: { async writeText(value) { copied.push(value); } } },
-    document: { getElementById(id) { return elements[id]; }, createElement: element },
+    document: { body: element(), addEventListener() {}, getElementById(id) { return elements[id]; }, createElement: element },
     history: { replaceState() {} },
     sessionStorage: {
       getItem(key) { return storage.get(key) || null; },
@@ -130,14 +130,14 @@ test("跨域或网络错误显示可重试错误状态", async () => {
   assert.equal(elements["system-version"].textContent, "未返回");
 });
 
-test("已有房间直接展示房间信息和 WebSocket 地址", async () => {
+test("已有房间直接展示牌桌并自动连接 WebSocket", async () => {
   const settings = { maxSeats: 6, seatingType: 0, smallBlind: 10, bigBlind: 20, startingStack: 1000, turnSeconds: 30 };
   const { elements, calls } = mount([{ status: 200, body: {
     code: 0, message: "success", systemVersion: version,
     data: { entryState: "ROOM_READY", created: false, activity, self, counts,
       room: { roomId: "A123", name: "周末牌局", status: "WAITING", settings },
       roomMembers: [{ id: "1", nickname: "创建人", state: "WATCHING", stack: 1000, online: false }],
-      connection: { url: "wss://api.example.com/ws/poker/v1", wsToken: "secret", protocolVersion: 1, expiresAt: "2026-09-30T04:00:00Z" } },
+      connection: { url: "wss://api.example.com/ws/poker/v1", wsToken: "secret", protocolVersion: 1, expiresAt: new Date(Date.now() + 60000).toISOString() } },
   } }], "access-token");
   await new Promise(setImmediate);
   assert.equal(calls.length, 1);
@@ -156,7 +156,7 @@ test("创建人选择配置建房后显示房间和 WebSocket 链接", async () 
       data: { entryState: "ROOM_CREATED", created: true, activity, self, counts,
         room: { roomId: "A123", name: "周末牌局", status: "WAITING", settings },
         roomMembers: [{ id: "1", nickname: "创建人", state: "WATCHING", stack: 1000, online: false }],
-        connection: { url: "wss://api.example.com/ws/poker/v1", wsToken: "secret", protocolVersion: 1, expiresAt: "2026-09-30T04:00:00Z" } } } },
+        connection: { url: "wss://api.example.com/ws/poker/v1", wsToken: "secret", protocolVersion: 1, expiresAt: new Date(Date.now() + 60000).toISOString() } } } },
   ], "access-token");
   await new Promise(setImmediate);
   assert.equal(elements["create-panel"].hidden, false);
@@ -200,7 +200,6 @@ test("展示、复制、连接使用修正后的云托管地址，并完成 AUTH
   assert.match(elements["debug-response"].textContent, /:80\/ws/);
   await elements["copy-ws-url"].listeners.click();
   assert.deepEqual(copied, [publicWsUrl]);
-  await elements["connect-ws"].listeners.click();
   assert.equal(sockets.length, 1);
   const socket = sockets[0];
   assert.equal(socket.url, publicWsUrl);
@@ -228,7 +227,6 @@ test("过期凭证通过主入口刷新，使用新 wsToken 认证", async () =>
     roomResponse({ wsToken: "fresh-secret" }),
   ], "", { apiBase: cloudBase });
   await new Promise(setImmediate);
-  await elements["connect-ws"].listeners.click();
   assert.equal(calls.length, 2);
   assert.equal(calls[1].url, cloudBase + "/api/poker/v1/entry");
   sockets[0].open();
@@ -244,7 +242,6 @@ test("刷新后房间已关闭或凭证仍过期时不建立 WebSocket", async (
       roomResponse({ expiresAt: "2000-01-01T00:00:00Z" }), next,
     ], "", { apiBase: cloudBase });
     await new Promise(setImmediate);
-    await elements["connect-ws"].listeners.click();
     assert.equal(sockets.length, 0);
   }
 });
@@ -252,7 +249,6 @@ test("刷新后房间已关闭或凭证仍过期时不建立 WebSocket", async (
 test("握手和认证错误在后续 close 事件后仍可见", async () => {
   const { elements, sockets } = mount([roomResponse()], "", { apiBase: cloudBase });
   await new Promise(setImmediate);
-  await elements["connect-ws"].listeners.click();
   sockets[0].onerror();
   sockets[0].onclose({ code: 1006, reason: "" });
   assert.equal(elements["ws-status"].textContent, "连接错误");
@@ -268,13 +264,11 @@ test("握手和认证错误在后续 close 事件后仍可见", async () => {
 test("HTTPS 页面拒绝明文 WS 地址，旧连接事件不影响新连接", async () => {
   const invalid = mount([roomResponse({ url: "ws://localhost/ws/poker/v1" })]);
   await new Promise(setImmediate);
-  await invalid.elements["connect-ws"].listeners.click();
   assert.equal(invalid.sockets.length, 0);
   assert.equal(invalid.elements["ws-status"].textContent, "连接地址无效");
 
   const { elements, sockets, intervals } = mount([roomResponse()], "", { apiBase: cloudBase });
   await new Promise(setImmediate);
-  await elements["connect-ws"].listeners.click();
   await elements["connect-ws"].listeners.click();
   sockets[1].open();
   sockets[1].receive({ type: "AUTH_OK" });
@@ -282,4 +276,83 @@ test("HTTPS 页面拒绝明文 WS 地址，旧连接事件不影响新连接", a
   sockets[0].onclose({ code: 1006, reason: "" });
   assert.equal(elements["ws-status"].textContent, "已连接");
   assert.equal(intervals.size, 1);
+});
+
+function gameSnapshot(overrides = {}) {
+  return { revision: 1, self: { ...self, seatIndex: 0, roomState: "IN_HAND", allowedCommands: [] },
+    room: { roomId: "A123", settings: { maxSeats: 6, smallBlind: 1, bigBlind: 2, turnSeconds: 30 } },
+    game: { handId: "H1", handNumber: 1, phase: "preflop", board: [], turn: 0, dealer: 1, pot: 6,
+      players: [{ seatIndex: 0, nickname: "本人", stack: 200, bet: 0, hole: ["Jc", "7h"] },
+        { seatIndex: 1, nickname: "对手", stack: 197, bet: 3, hole: ["As", "Ah"] }],
+      legal: { toCall: 3, canFold: true, canCall: true, canCheck: false, canRaise: true, minRaiseTo: 6, maxRaiseTo: 200 } }, ...overrides };
+}
+function authenticate(socket) { socket.open(); socket.receive({ type: "AUTH_OK" }); }
+function descendants(root) { return [root, ...root.children.flatMap(descendants)]; }
+
+test("403 与解密错误只给对应提示，不展示登录表单或旧房间", async () => {
+  for (const [status, detail] of [[403, "你不是活动成员"], [400, "ticket 解密失败"]]) {
+    const { elements, sockets } = mount([{ status, body: { code: status, message: detail } }]);
+    await new Promise(setImmediate);
+    assert.equal(elements["error-panel"].hidden, false);
+    assert.equal(elements["error-detail"].textContent, detail);
+    assert.equal(elements["login-panel"].hidden, true);
+    assert.equal(elements["message"].textContent, "");
+    assert.equal(elements["debug-panel"].hidden, true);
+    assert.equal(sockets.length, 0);
+  }
+});
+
+test("自动认证后等到快照才允许行动，发送操作后等待服务端确认且不修改筹码", async () => {
+  const { elements, sockets } = mount([roomResponse({}, { ...gameSnapshot(), entryState: "ROOM_READY" })]);
+  await new Promise(setImmediate);
+  assert.equal(sockets.length, 1);
+  authenticate(sockets[0]);
+  assert.equal(elements["fold-action"].disabled, true);
+  sockets[0].receive({ type: "SNAPSHOT", payload: gameSnapshot() });
+  assert.equal(elements["fold-action"].disabled, false);
+  elements["call-action"].listeners.click();
+  assert.equal(elements["call-action"].disabled, true);
+  const action = sockets[0].sent.at(-1);
+  assert.equal(action.type, "ACTION");
+  assert.equal(action.payload.action, "call");
+  assert.equal(action.payload.handId, "H1");
+  assert.equal(action.payload.expectedRevision, 1);
+  elements["call-action"].listeners.click();
+  assert.equal(sockets[0].sent.filter((f) => f.type === "ACTION").length, 1);
+  assert.ok(descendants(elements["table-seats"]).some((e) => e.className === "seat-stack" && e.textContent === "200"));
+  sockets[0].receive({ type: "ERROR", payload: { message: "下注已过期" } });
+  assert.equal(elements["ws-status"].textContent, "已连接");
+  assert.equal(elements["table-notice"].textContent, "下注已过期");
+});
+
+test("隐藏对手底牌，忽略旧快照，同一手不重复发牌；新手触发两轮动画", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const first = gameSnapshot(); sockets[0].receive({ type: "SNAPSHOT", payload: first });
+  assert.equal(elements["deal-layer"].children.length, 4);
+  const originalFlights = elements["deal-layer"].children;
+  const cards = descendants(elements["table-seats"]).filter((e) => e.className.startsWith("card"));
+  assert.equal(cards.filter((e) => e.className.includes("back")).length, 2);
+  assert.ok(!descendants(elements["table-seats"]).some((e) => e.attributes["aria-label"] === "A♠"));
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: 2, game: { ...first.game, pot: 12, board: ["As", "Th", "2d"] } } });
+  assert.equal(elements["table-pot"].textContent, "12");
+  assert.equal(elements["deal-layer"].children, originalFlights);
+  sockets[0].receive({ type: "SNAPSHOT", payload: first });
+  assert.equal(elements["table-pot"].textContent, "12");
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: 3, game: { ...first.game, handId: "H2", handNumber: 2 } } });
+  assert.notEqual(elements["deal-layer"].children, originalFlights);
+});
+
+test("旁观者不可行动；服务端授权后才显示入座准备选项；关房移除牌桌", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  sockets[0].receive({ type: "SNAPSHOT", payload: gameSnapshot({ self: { ...self, seatIndex: null, allowedCommands: ["SIT_DOWN"] } }) });
+  assert.equal(elements["fold-action"].disabled, true);
+  assert.equal(elements["sit-down"].hidden, false);
+  assert.equal(elements["ready-player"].hidden, true);
+  elements["sit-down"].listeners.click();
+  assert.equal(sockets[0].sent.at(-1).type, "SIT_DOWN");
+  sockets[0].receive({ type: "ROOM_CLOSED" });
+  assert.equal(elements["closed-panel"].hidden, false);
+  assert.equal(elements["room-panel"].hidden, true);
 });
