@@ -3,82 +3,44 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#101d1a">
   <meta name="referrer" content="no-referrer">
-  <meta name="description" content="活动专属德州扑克牌桌入口">
-  <title>活动牌桌 · 桌边 Poker Club</title>
+  <meta name="theme-color" content="#111b17">
+  <title>扑克接口请求</title>
   <link rel="stylesheet" href="./p.css">
 </head>
 <body>
-  <div class="page-shell">
-    <header class="site-header">
-      <a class="brand" href="./" aria-label="桌边首页"><span class="brand-mark">♠</span><span>桌边 <small>POKER CLUB</small></span></a>
-      <div class="header-right"><button class="header-inspector" id="jump-inspector" type="button">查看接口记录 ↘</button><span class="header-rule"></span><span id="header-user">专属活动入口</span></div>
-    </header>
-    <main>
-      <section class="intro" aria-labelledby="page-title">
-        <div class="intro-copy">
-          <div class="eyebrow"><span class="eyebrow-line"></span> YOUR PRIVATE TABLE</div>
-          <h1 id="page-title">牌桌已备好，<br><em>等你入场。</em></h1>
-          <p>一场活动，一张专属牌桌。验证身份后即可查看活动成员、房间和筹码状态。</p>
-          <div class="intro-pills"><span>♠ 活动专属</span><span>◇ 实时房间</span><span>◉ 虚拟筹码</span></div>
-        </div>
-        <div class="intro-card" aria-hidden="true"><div class="card-back">♠<small>POKER CLUB</small></div><div class="card-front"><span>A</span><strong>♠</strong><span>A</span></div><div class="intro-chip">100</div></div>
-      </section>
-      <div class="notice" id="notice" role="status" aria-live="polite" hidden></div>
-      <section class="entry-panel" id="login-panel" aria-labelledby="entry-title">
-        <div class="panel-top"><span class="step">01 / 验证身份</span><span class="panel-icon">↗</span></div>
-        <div class="entry-content"><div><h2 id="entry-title">进入活动牌桌</h2><p class="subcopy">使用与活动链接相同账号的访问令牌。验证成功后，会自动进入已创建的房间。</p></div>
-          <form id="entry-form" novalidate><label for="access-token">Access token</label><div class="token-field"><input id="access-token" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="粘贴当前登录账号的 access token" required><button type="button" id="toggle-token" aria-label="显示令牌">显示</button></div><p class="field-hint">令牌仅用于本次页面请求，不会写入本地存储或 URL。</p><button class="button primary" id="enter-button" type="submit">验证并进入 <span>↗</span></button></form>
-        </div>
-      </section>
-      <section class="activity-panel" id="activity-panel" hidden aria-labelledby="activity-title">
-        <div class="activity-head"><div><span class="step">ACTIVITY / 活动信息</span><h2 id="activity-title">活动牌桌</h2><p id="activity-id"></p></div><span class="status-pill" id="activity-status">进行中</span></div>
-        <div class="activity-facts"><div><small>你的身份</small><strong id="self-role">—</strong></div><div><small>活动成员</small><strong id="activity-count">—</strong></div><div><small>已进入房间</small><strong id="room-count">—</strong></div></div>
-      </section>
-      <section class="stage-panel" id="stage-panel" hidden aria-labelledby="stage-title">
-        <div class="stage-symbol" id="stage-symbol">◇</div><span class="step" id="stage-kicker">等待牌桌</span><h2 id="stage-title">正在确认房间</h2><p id="stage-copy"></p>
-        <div class="stage-actions"><button class="button secondary" type="button" id="refresh-button">刷新房间状态 ↻</button></div>
-      </section>
-      <section class="create-panel" id="create-panel" hidden aria-labelledby="create-title">
-        <div class="create-heading"><div><span class="step">02 / 创建房间</span><h2 id="create-title">为这场活动开一桌</h2><p>你是活动创建人。确认配置后建房；房间创建成功会自动以旁观身份进入。</p></div><span class="create-suit">♣</span></div>
-        <form id="create-form" novalidate>
-          <div class="preset-row"><div><strong>经典配置</strong><small>6 人桌 · 盲注 10 / 20 · 初始 1,000 筹码</small></div><label class="switch"><input type="checkbox" id="custom-settings"><span class="switch-track"></span><span>自定义</span></label></div>
-          <div class="settings-grid" id="settings-grid" hidden>
-            <label>座位上限<input name="maxSeats" type="number" min="2" max="9" step="1" value="6" inputmode="numeric"></label>
-            <label>落座方式<select name="seatingType"><option value="0">随机落座</option><option value="1">自主选座</option></select></label>
-            <label>小盲注<input name="smallBlind" type="number" min="1" step="1" value="10" inputmode="numeric"></label>
-            <label>大盲注<input name="bigBlind" type="number" min="1" step="1" value="20" inputmode="numeric"></label>
-            <label>初始筹码<input name="startingStack" type="number" min="20" step="1" value="1000" inputmode="numeric"></label>
-            <label>行动时限（秒）<input name="turnSeconds" type="number" min="10" max="120" step="1" value="30" inputmode="numeric"></label>
-          </div>
-          <p class="form-note">配置建房后固定；每位成员首次进入时只领取一次初始虚拟筹码。</p>
-          <button class="button primary" id="create-button" type="submit">创建并进入房间 <span>↗</span></button>
-        </form>
-      </section>
-      <section class="room-area" id="room-area" hidden aria-labelledby="room-title">
-        <div class="room-heading"><div><span class="step">02 / 活动房间</span><h2 id="room-title">你的牌桌</h2><p>进入成功 · 默认旁观，牌局功能开放后可入座参与</p></div><div class="connection"><span class="connection-dot" id="connection-dot"></span><span id="connection-label">正在连接</span><button class="text-button" id="reconnect-button" type="button">重新连接</button></div></div>
-        <div class="room-layout">
-          <div class="table-column"><div class="table-outer"><div class="table-felt"><div class="table-topline">POKER CLUB <span>✦</span> PRIVATE TABLE</div><div class="table-center"><span class="table-emblem">♠</span><strong id="table-name">活动牌桌</strong><small id="table-subtitle">等待成员加入</small></div><div class="seat-ring" id="seat-ring"></div></div></div><div class="room-stats"><div><small>在线</small><strong id="online-count">0</strong></div><div><small>已入座</small><strong id="seated-count">0</strong></div><div><small>已准备</small><strong id="ready-count">0</strong></div><div><small>座位上限</small><strong id="max-seats">6</strong></div></div></div>
-          <aside class="room-sidebar"><div class="side-card self-card"><span class="step">YOUR POSITION / 你的状态</span><div class="self-line"><span class="avatar" id="self-avatar">你</span><div><strong id="self-name">你</strong><small id="self-state">旁观中</small></div></div><div class="chip-balance"><small>当前筹码余额</small><strong id="self-stack">— <span>CHIPS</span></strong></div><p>虚拟筹码只供游戏使用，不具有现金价值。</p></div><div class="side-card settings-card"><span class="step">TABLE RULES / 房间配置</span><dl id="room-settings"></dl></div></aside>
-        </div>
-        <div class="members-panel"><div class="members-heading"><div><span class="step">PLAYERS / 房间成员</span><h3>已进入的伙伴 <span id="member-total">0</span></h3></div><span>活动成员需亲自验证后才会显示在这里</span></div><div id="members-list" class="members-list"></div></div>
-        <div class="availability"><span>◌</span><div><strong>牌局即将开放</strong><p>当前服务支持建房、进房与实时快照。入座、准备和下注尚未开放。</p></div></div>
-      </section>
-      <section class="inspector" id="api-inspector" aria-labelledby="inspector-title">
-        <div class="inspector-head">
-          <div><span class="step">NETWORK / 接口记录</span><h2 id="inspector-title">请求与响应</h2><p>按发生顺序展示本次页面的 HTTP 调用和 WebSocket 消息。</p></div>
-          <label class="reveal-control"><input id="reveal-secrets" type="checkbox"><span>显示完整凭证</span></label>
-        </div>
-        <p class="inspector-hint">Bearer token、ticket 和 wsToken 默认隐藏。显示完整凭证时，请勿分享截图或复制给他人。记录只保留在当前页面内存中。</p>
-        <div class="inspector-grid">
-          <div class="trace-section"><div class="trace-heading"><h3>HTTP 请求</h3><span id="http-total">0 条</span></div><div id="http-traces" class="trace-list"><p class="trace-empty">尚未发起请求。验证身份后，这里会显示请求体和完整响应。</p></div></div>
-          <div class="trace-section"><div class="trace-heading"><h3>WebSocket 消息</h3><span id="ws-total">0 条</span></div><div id="ws-traces" class="trace-list"><p class="trace-empty">建立实时连接后，这里会显示 AUTH、SNAPSHOT 等消息。</p></div></div>
-        </div>
-      </section>
-    </main>
-    <footer><span>桌边 POKER CLUB</span><span>仅供娱乐与学习 · 虚拟筹码无现金价值</span></footer>
-  </div>
+  <main class="page">
+    <div class="version">页面版本 <time id="page-version" datetime="2026-09-30T11:22:22+08:00">2026-09-30 11:22:22</time></div>
+
+    <section class="panel" aria-labelledby="endpoint-title">
+      <h1 id="endpoint-title">请求接口</h1>
+      <div class="endpoint-row">
+        <label for="endpoint">接口</label>
+        <select id="endpoint">
+          <option value="/api/poker/v1/entry">POST /api/poker/v1/entry</option>
+          <option value="/api/poker/v1/rooms">POST /api/poker/v1/rooms</option>
+        </select>
+      </div>
+      <code id="endpoint-url" class="endpoint-url"></code>
+    </section>
+
+    <section class="panel" aria-labelledby="request-title">
+      <h2 id="request-title">请求内容</h2>
+      <label class="field" for="access-token">Bearer access token
+        <input id="access-token" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="粘贴 access token">
+      </label>
+      <label class="field" for="request-body">JSON 请求体
+        <textarea id="request-body" spellcheck="false" rows="7"></textarea>
+      </label>
+      <pre id="request-preview" class="json-view" aria-label="实际发送的请求"></pre>
+      <div class="request-actions"><button id="send-request" type="button">发送请求</button><span id="request-error" role="alert"></span></div>
+    </section>
+
+    <section class="panel" aria-labelledby="response-title">
+      <div class="response-heading"><h2 id="response-title">返回内容</h2><span id="response-status">尚未请求</span></div>
+      <pre id="response-body" class="json-view" aria-live="polite">尚未发送请求</pre>
+    </section>
+  </main>
   <script type="module" src="./src/p.js"></script>
 </body>
 </html>
