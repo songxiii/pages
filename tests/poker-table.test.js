@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ownSeat, tableLayout, raisePresets, handPositions, seatIndex, buyInOptions, memberAmounts } from "../src/poker-table.js";
+import { ownSeat, tableLayout, raisePresets, handPositions, seatIndex, buyInOptions, memberAmounts, seatPositions } from "../src/poker-table.js";
 
 test("成员盈亏优先使用服务字段，兼容账本差额，缺失金额不能冒充零", () => {
   assert.deepEqual(memberAmounts({ totalBuyIn: 1000, stack: 800, netChips: 50 }), { totalBuyIn: 1000, netChips: 50 });
@@ -72,4 +72,25 @@ test("带入下拉只接受服务规定的安全整数、范围和增量，缺�
   assert.deepEqual(buyInOptions({ room: { buyIn } }), [200, 400]);
   assert.deepEqual(buyInOptions({ room: { buyIn: { ...buyIn, step: 0 } } }), []);
   assert.deepEqual(buyInOptions({}), []);
+});
+
+test("2–9人按本手参局顺序显示中文盲位和庄位、UTG等位置，跳过空座保留弃牌者", () => {
+  const early = { 3: [], 4: ["UTG"], 5: ["UTG", "CO"], 6: ["UTG", "HJ", "CO"],
+    7: ["UTG", "UTG+1", "HJ", "CO"], 8: ["UTG", "UTG+1", "LJ", "HJ", "CO"],
+    9: ["UTG", "UTG+1", "UTG+2", "LJ", "HJ", "CO"] };
+  for (let count = 3; count <= 9; count++) {
+    for (let dealer = 0; dealer < count; dealer++) {
+      const sb = (dealer + 1) % count, bb = (dealer + 2) % count;
+      const positions = seatPositions({ dealer, smallBlindSeat: sb, bigBlindSeat: bb,
+        players: Array.from({ length: count }, (_, seatIndex) => ({ seatIndex, folded: seatIndex === 4 })) });
+      assert.equal(positions.get(dealer), "庄位"); assert.equal(positions.get(sb), "小盲"); assert.equal(positions.get(bb), "大盲");
+      early[count].forEach((name, i) => assert.equal(positions.get((bb + 1 + i) % count), name));
+    }
+  }
+  assert.deepEqual([...seatPositions({ dealer: 2, players: [{ seatIndex: 2, position: "SB" }, { seatIndex: 7, position: "BB" }] })], [[2, "庄位/小盲"], [7, "大盲"]]);
+  const game = { dealer: 0, smallBlindSeat: 2, bigBlindSeat: 3,
+    players: [0, 2, 3, 5, 8].map((seatIndex) => ({ seatIndex, folded: seatIndex === 5 })) };
+  assert.equal(seatPositions(game).get(5), "UTG"); assert.equal(seatPositions(game).get(8), "CO");
+  assert.equal(seatPositions({ ...game, players: [...game.players, { seatIndex: 6, position: "UTG+1" }] }).get(6), "UTG+1");
+  assert.equal(seatPositions(null).size, 0);
 });

@@ -6,6 +6,8 @@
 
 Java 的当前鉴权口径为 **ticket-only**：entry/rooms 不需要 Authorization，身份来自服务端校验的 ticket。数据库需新增 `poker_activity_state/poker_activity_command`；牌局加密默认从已有 `POKER_WS_SECRET` 派生，无需增加密钥配置，`POKER_STATE_KEY` 是可选优先覆盖。外部 `seatIndex` 从 0 开始，数据库 `seat_no` 保持 1 起；Java 早期设计稿中的 `SET_READY/PLAYER_ACTION/commandId/actionId` 和增量事件不用于此页面。
 
+后端待实现功能的独立交付文档见 [Java 后端待实现接口设计](POKER_BACKEND_TODO.md)，含命令、字段、事务顺序和验收用例。
+
 ## 1. 活动入口和开房（沿用）
 
 页面地址 `p.html#ticket=...`，访问即调用：
@@ -63,7 +65,7 @@ Java 已确认 entry/rooms 只要求请求体 ticket，票据允许转发，接�
 
 ### 房间成员金额展示
 
-成员列表使用 `roomMembers[].avatarUrl/nickname/state/seatIndex/online/totalBuyIn/netChips`，当前 Java 视图已提供这些字段，不需要新增查询接口。头像为 30px，缺失、非法地址或加载失败时显示昵称首字。右侧 `netChips > 0` 显示红色「盈利 +金额」，小于零显示绿色「亏损 -金额」，等于零使用默认字体颜色显示 `0`；下方显示「累计带入 totalBuyIn」。每次完整 SNAPSHOT 同步刷新。
+成员列表使用 `roomMembers[].avatarUrl/nickname/state/seatIndex/online/totalBuyIn/netChips`，当前 Java 视图已提供这些字段，不需要新增查询接口。头像为 30px，缺失、非法地址或加载失败时显示昵称首字。右侧 `netChips > 0` 显示红色「+金额」，小于零显示绿色「-金额」，等于零使用默认字体颜色显示 `0`；下方显示「累计带入 totalBuyIn」。每次完整 SNAPSHOT 同步刷新。
 
 缺失 `netChips` 时，仅在 `stack` 与 `totalBuyIn` 都有效时用两者差额兼容；金额缺失显示 `—`，不能误报零。累计带入只包含已到账金额，未结算的 `pendingBuyIn` 不混入。当前 Java 的 `netChips = stack - totalBuyIn` 是实时账面差额，手牌中已下注但未分配的底池会暂时体现为负数；若产品需要仅统计已完成手牌，Java 应将 `netChips` 改为结算后账本差额，并在下注期间保持上手结果，前端直接使用该值。
 
@@ -120,6 +122,7 @@ Java 校验 token 所属用户、活动和房间后，依次发送 `AUTH_OK` 与
 - `handId` 每手唯一。新手触发两轮从桌心飞向座位的发牌动画，公共牌新增时翻牌；同手普通更新不重复发牌。
 - 前端按 `room.settings.maxSeats` 选用 2–9 人布局，保留空座。本人 `self.seatIndex` 始终旋转到屏幕正下方，其他座位按服务端座位顺序排列；旋转不改变命令中的真实座位编号。旁观者以 0 号座位为底部锚点。
 - `dealer`、`smallBlindSeat`、`bigBlindSeat` 分别标记庄家 D、小盲 SB、大盲 BB，都是零基座位号。请 Java 在每手快照明确提供这三个字段，特殊规则下没有对应位置时明确返回 `null`。双人局庄家与小盲在同一座位，前端同时显示 D 和 SB。兼容旧快照：盲位优先从 `players[].position=SB/BB` 读取，否则根据本手 `game.players` 的参局座位与庄家推导，跳过空座，已弃牌者仍保留本手盲位；不会用下注额猜盲位。
+- 位置标签显示「庄位 / 小盲 / 大盲」，双人庄位兼小盲显示「庄位/小盲」。其他位置优先使用 `game.players[].position`；旧 Java 留空时，前端按本手参局成员从大盲后开始补齐 UTG、UTG+1、UTG+2、LJ、HJ、CO，详见独立交付文档。
 - `turn` 和 `dealer` 都是座位号。`turnDeadline` 为 UTC/带时区 ISO 时间，前端显示剩余行动秒数，超时动作由 Java 执行。
 - `pot` 是服务端计算的当前总底池。`bet` 是该玩家本轮总下注，`stack` 是尚未下注的筹码；不要只传动作增量。
 - 未摊牌时对手底牌只传 `[null,null]`，本人可传 `Jc`、`7h` 等编码。旁观连接隐藏所有未公开底牌。禁止把牌堆、随机种子或全房间未公开底牌发给浏览器。
@@ -146,7 +149,7 @@ Java 校验 token 所属用户、活动和房间后，依次发送 `AUTH_OK` 与
 
 ### 点击虚线空座
 
-桌上的头像角标和成员列表显示实际的 1 起座位号（`seatIndex + 1`），本人视觉位置始终旋转到正下方，不修改真实编号。随机房间点击任意空座都只申请随机分配，不指定点击的座位。若反复落座的快照仍始终返回 `self.seatIndex=0`，应核对线上 Java 版本、可用座位集合以及随机选择逻辑；当前本地 Java 源码使用 `SecureRandom.nextInt(empty.size())` 随机挑选空位。
+页面不展示座位序号，空位统一显示「空座」，成员列表仅显示状态和在线信息。真实 `seatIndex` 仍用于命令与布局，本人视觉位置始终旋转到正下方，不修改真实编号。随机房间点击任意空座都只申请随机分配，不指定点击的座位。若反复落座的快照仍始终返回 `self.seatIndex=0`，应核对线上 Java 版本、可用座位集合以及随机选择逻辑；当前本地 Java 源码使用 `SecureRandom.nextInt(empty.size())` 随机挑选空位。
 
 点击空座根据房间配置发送兼容当前 Java 的消息：`seatingType=1` 自选房间发送 `{"seatIndex":2}`，号码是服务端真实的零基座位号；`seatingType=0` 随机房间发送空 `payload={}`，由 Java 随机选择可用座位。新开房默认自主选座，既有随机房间仍可点击任意空座申请随机入座。
 

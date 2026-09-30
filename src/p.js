@@ -1,4 +1,4 @@
-import { createPokerTable, formatChips, safeAvatar, memberAmounts, seatIndex } from "./poker-table.js?v=20261001-member-balances";
+import { createPokerTable, formatChips, safeAvatar, memberAmounts } from "./poker-table.js?v=20261001-position-labels";
 import { POKER_API_BASE_URL } from "./poker-config.js";
 import { ticketFromLocation, ticketFragmentUrl, validateSettings, redactCredentials, normalizeWebSocketUrl } from "./poker-entry.js";
 
@@ -337,17 +337,16 @@ function renderRoom() {
     const name = document.createElement("strong");
     name.textContent = member.nickname || "房间成员";
     const detail = document.createElement("small");
-    const seat = seatIndex(member);
     detail.textContent = (stateNames[member.state] || member.state || "旁观中")
-      + (seat === null ? "" : " · " + (Number(seat) + 1) + "号位") + " · " + (member.online ? "在线" : "离线");
+      + " · " + (member.online ? "在线" : "离线");
     profile.append(name, detail);
     const balance = document.createElement("div");
     balance.className = "member-balance";
     const { totalBuyIn, netChips } = memberAmounts(member);
     const profit = document.createElement("strong");
     profit.className = "member-profit" + (netChips > 0 ? " profit-positive" : netChips < 0 ? " profit-negative" : "");
-    profit.textContent = netChips === null ? "盈亏 —" : netChips > 0 ? "盈利 +" + formatChips(netChips)
-      : netChips < 0 ? "亏损 " + formatChips(netChips) : "0";
+    profit.textContent = netChips === null ? "—" : netChips > 0 ? "+" + formatChips(netChips)
+      : netChips < 0 ? formatChips(netChips) : "0";
     const buyIn = document.createElement("small");
     buyIn.className = "member-buy-in";
     buyIn.textContent = "累计带入 " + (totalBuyIn === null ? "—" : formatChips(totalBuyIn));

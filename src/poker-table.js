@@ -66,6 +66,34 @@ export function handPositions(game) {
     : taggedSeat("BB") ?? (seats.length >= 2 && dealer !== null ? (seats.length === 2 ? afterDealer[0] : afterDealer[1]) : null);
   return { dealer, smallBlindSeat, bigBlindSeat };
 }
+// Positions belong to this hand's participants, including folded players, not to empty room seats.
+export function seatPositions(game) {
+  const labels = new Map();
+  if (!game) return labels;
+  const roles = handPositions(game);
+  const players = game.players || [];
+  const seats = [...new Set(players.map((p) => seatIndex(p)).filter((s) => s !== null).map(Number))].sort((a, b) => a - b);
+  const earlyPositions = { 1: ["UTG"], 2: ["UTG", "CO"], 3: ["UTG", "HJ", "CO"],
+    4: ["UTG", "UTG+1", "HJ", "CO"], 5: ["UTG", "UTG+1", "LJ", "HJ", "CO"],
+    6: ["UTG", "UTG+1", "UTG+2", "LJ", "HJ", "CO"] };
+  if (roles.bigBlindSeat !== null && roles.dealer !== null && roles.smallBlindSeat !== null) {
+    const afterBlind = [...seats.filter((s) => s > roles.bigBlindSeat), ...seats.filter((s) => s <= roles.bigBlindSeat)];
+    const early = afterBlind.filter((s) => !Object.values(roles).includes(s));
+    early.forEach((s, i) => labels.set(s, earlyPositions[early.length]?.[i] || ""));
+  }
+  for (const player of players) {
+    const supplied = String(player.position || "").toUpperCase();
+    if (supplied && !["BTN", "D", "SB", "BB"].includes(supplied)) labels.set(Number(seatIndex(player)), supplied);
+  }
+  for (const s of seats) {
+    const names = [];
+    if (s === roles.dealer) names.push("庄位");
+    if (s === roles.smallBlindSeat) names.push("小盲");
+    if (s === roles.bigBlindSeat) names.push("大盲");
+    if (names.length) labels.set(s, names.join("/"));
+  }
+  return labels;
+}
 export function raisePresets(game) {
   const legal = game?.legal;
   if (!legal?.canRaise || !Number.isFinite(legal.minRaiseTo) || !Number.isFinite(legal.maxRaiseTo)
@@ -125,7 +153,8 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
   }
   function resize() {
     const stage = $("table-stage");
-    stage.style.setProperty("--seat-size", Math.min(76, stage.clientWidth * .15, stage.clientHeight * .115) + "px");
+    // Reserve one caption line for hand positions on short portrait screens.
+    stage.style.setProperty("--seat-size", Math.max(24, Math.min(76, stage.clientWidth * .15, stage.clientHeight * .115 - (game ? 10 : 0))) + "px");
     const layout = currentLayout();
     for (const el of $("table-seats").children) {
       const place = layout.find((p) => String(p.seatIndex) === el.getAttribute("data-seat-index"));
@@ -278,6 +307,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     const newHand = handKey !== null && handKey !== lastHand;
     const layout = currentLayout();
     const roles = handPositions(game);
+    const positions = seatPositions(game);
     const layoutKey = layout.length + ":" + selfSeat;
     if (layoutKey !== lastLayoutKey) {
       clearTimeout(dealCleanupTimer); $("deal-layer").replaceChildren(); lastLayoutKey = layoutKey;
@@ -297,25 +327,23 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
         + (place.x > 50 ? " right" : "") + (place.y < 25 ? " top" : "") + (place.y > 85 ? " bottom" : ""));
       el.setAttribute("data-seat-index", String(place.seatIndex));
       if (!person) {
-        el.type = "button"; el.setAttribute("aria-label", "座位 " + (place.seatIndex + 1) + "，点击落座");
+        el.type = "button"; el.setAttribute("aria-label", "空座，点击落座");
         el.addEventListener("click", () => command("SIT_DOWN", { seatIndex: place.seatIndex }));
         seatButtons.push(el); openSeats.add(place.seatIndex);
       }
       el.style.setProperty("--x", place.x + "%"); el.style.setProperty("--y", place.y + "%"); el.style.setProperty("--hue", String((place.seatIndex * 59 + 220) % 360));
       const name = person?.nickname || person?.name || member?.nickname || (mine ? view.self?.nickname : null) || "玩家";
       const avatar = node("div", "seat-avatar"); avatar.append(node("span", "avatar-monogram", person ? [...name][0] : "+"));
-      if (person) el.append(node("span", "seat-number", (place.seatIndex + 1) + "号"));
       const avatarUrl = safeAvatar(person?.avatarUrl || member?.avatarUrl || (mine ? view.self?.avatarUrl : null));
       if (avatarUrl) { const img = node("img", ""); img.src = avatarUrl; img.alt = ""; img.referrerPolicy = "no-referrer"; img.addEventListener("error", () => img.remove()); avatar.append(img); }
       const label = node("div", "seat-label");
-      const rolePosition = place.seatIndex === roles.smallBlindSeat ? "SB" : place.seatIndex === roles.bigBlindSeat ? "BB" : place.seatIndex === roles.dealer ? "BTN" : null;
-      const position = rolePosition || (!["SB", "BB", "BTN", "D"].includes(String(person?.position || "").toUpperCase()) ? person?.position : null);
+      const position = person ? positions.get(place.seatIndex) : null;
       if (position) label.append(node("span", "seat-position", position));
-      label.append(node("span", "seat-name", person ? name : "空座 " + (place.seatIndex + 1)));
+      label.append(node("span", "seat-name", person ? name : "空座"));
       if (person) label.append(node("strong", "seat-stack", formatChips(person.stack)));
       if (person?.folded || person?.allIn || person?.online === false) label.append(node("span", "seat-state", person.folded ? "已弃牌" : person.allIn ? "ALL IN" : "离线"));
       const markers = node("div", "seat-markers");
-      for (const [role, seat, title] of [["D", roles.dealer, "庄家"], ["SB", roles.smallBlindSeat, "小盲"], ["BB", roles.bigBlindSeat, "大盲"]]) {
+      for (const [role, seat, title] of [["D", roles.dealer, "庄位"], ["SB", roles.smallBlindSeat, "小盲"], ["BB", roles.bigBlindSeat, "大盲"]]) {
         if (seat !== place.seatIndex) continue;
         const badge = node("span", "seat-marker " + (role === "D" ? "dealer-button" : role === "SB" ? "small-blind-marker" : "big-blind-marker"), role);
         badge.setAttribute("title", title); badge.setAttribute("aria-label", title); markers.append(badge);
@@ -346,7 +374,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     $("table-phase").textContent = game ? "第 " + (game.handNumber ?? "—") + " 手 · " + (PHASE_NAMES[game.phase] || "牌局进行中") : "等待开局";
     $("table-result").textContent = game?.result?.message || "";
     $("table-notice").textContent = !connected ? "正在同步牌局…" : roomControls(view).paused ? "游戏已暂停，等待房主继续"
-      : !game ? (selfSeat === null ? (Number(settings.seatingType) === 0 ? "点击任意空座随机落座，由房主开始游戏" : "点击虚线空座落座，由房主开始游戏") : "已入座 " + (selfSeat + 1) + " 号位，等待房主开始游戏")
+      : !game ? (selfSeat === null ? (Number(settings.seatingType) === 0 ? "点击任意空座随机落座，由房主开始游戏" : "点击虚线空座落座，由房主开始游戏") : "已入座，等待房主开始游戏")
       : selfSeat === null ? "你正在旁观本场牌局" : canAct() ? "轮到你行动" : game.phase === "complete" ? "本局结束，等待下一手" : "等待其他玩家行动";
     deadline = Date.parse(game?.turnDeadline || "");
     if (currentSeconds) currentSeconds.hidden = !Number.isFinite(deadline);

@@ -858,7 +858,6 @@ select {
 .member-profit { color:inherit; }
 .member-profit.profit-positive { color:#ff666e; }
 .member-profit.profit-negative { color:#58cc99; }
-.seat-number { position:absolute; top:0; left:calc(50% - var(--seat-size,60px) / 2); z-index:3; padding:1px 3px; border-radius:4px; background:#141925; border:1px solid #737b8c; color:#e2e5ec; font-size:8px; line-height:1.25; white-space:nowrap; }
 .member small {
   font-size:10px;
   color:var(--muted);
@@ -1115,13 +1114,13 @@ body.room-mode { height:100dvh; min-height:0; }
 .room-mode .seat-label { padding:3px 4px; }
 .room-mode .seat-name { font-size:10px; line-height:1.25; }
 .room-mode .seat-stack { font-size:12px; }
-.room-mode .seat-position { position:absolute; top:-11px; left:2px; padding:0 3px; font-size:8px; background:#10131fcc; border-radius:3px; }
-.room-mode .seat-markers { top:-12px; right:-3px; gap:2px; }
+.room-mode .seat-position { position:static; padding:0; margin:0; font-size:8px; line-height:1.2; color:#bac2d2; white-space:nowrap; }
+.room-mode .seat-markers { top:-21px; right:-3px; gap:2px; }
 .room-mode .seat-marker { width:19px; height:19px; font-size:8px; }
 .room-mode .dealer-button { font-size:12px; }
 .seat-readiness { position:absolute; top:0; right:0; padding:2px 4px; border:1px solid #83cca060; border-radius:7px; color:#b4e8c4; background:#19402ee8; font-size:9px; z-index:6; }
-.room-mode .hole-cards { bottom:29px; }
-.room-mode .seat.self .hole-cards { bottom:29px; }
+.room-mode .hole-cards { bottom:39px; }
+.room-mode .seat.self .hole-cards { bottom:39px; }
 .room-mode .seat.self .card { width:clamp(28px,calc(var(--seat-size) * .72),45px); height:clamp(39px,calc(var(--seat-size) * 1.0),62px); }
 .room-mode .seat.self .rank { font-size:16px; }
 .room-mode .seat.self .suit { font-size:25px; }
