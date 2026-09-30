@@ -2,10 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
+import { ticketFromLocation, validateSettings, responseData, DEFAULT_SETTINGS } from "../src/poker-entry.js";
 
 const index = readFileSync(new URL("../index.html", import.meta.url), "utf8");
 const entryScript = index.match(/<script>([\s\S]*?)<\/script>/)[1];
-const pageScript = readFileSync(new URL("../src/p.js", import.meta.url), "utf8");
+const page = readFileSync(new URL("../p.html", import.meta.url), "utf8");
 
 test("首页将 hash ticket 转到 p.html，保留在 hash 中", () => {
   let destination;
@@ -37,54 +38,27 @@ test("首页兼容查询参数 ticket，普通访问继续加载游戏", () => {
   assert.equal(app.src, "./src/app.js");
 });
 
-function runPageWithResponse(responseText, status) {
-  const elements = {
-    result: { textContent: "" },
-    profile: { hidden: true },
-    avatar: { hidden: true, src: "", alt: "" },
-    "avatar-fallback": { hidden: false, textContent: "人" },
-    "user-name": { textContent: "" },
-    "activity-id": { textContent: "" },
-  };
-  let request;
-  class FakeRequest {
-    constructor() { request = this; }
-    open(method, url) { this.method = method; this.url = url; }
-    setRequestHeader(name, value) { this.header = [name, value]; }
-    send(body) {
-      this.body = body;
-      this.status = status;
-      this.responseText = responseText;
-      this.onload();
-    }
+test("活动页面提供验证、建房、等待和旁观房间视图", () => {
+  for (const id of ["entry-form", "create-form", "stage-panel", "room-area", "seat-ring", "members-list"]) {
+    assert.match(page, new RegExp(`id="${id}"`));
   }
-  runInNewContext(pageScript, {
-    window: { location: { search: "", hash: "#ticket=v1.k1.test" } },
-    document: { getElementById(id) { return elements[id]; } },
-    XMLHttpRequest: FakeRequest,
-  });
-  return { elements, request };
-}
-
-test("p.html 仅将 ticket 作为 JSON 提交，并显示错误响应内容", () => {
-  const { elements, request } = runPageWithResponse('{"code":401,"message":"链接无效"}', 401);
-  assert.equal(request.method, "POST");
-  assert.equal(request.header[0], "Content-Type");
-  assert.equal(request.header[1], "application/json");
-  assert.deepEqual(JSON.parse(request.body), { ticket: "v1.k1.test" });
-  assert.match(elements.result.textContent, /链接无效/);
-  assert.equal(elements.profile.hidden, true);
+  assert.match(page, /type="module" src="\.\/src\/p\.js"/);
 });
 
-test("p.html 显示成功响应中的头像、姓名和活动 ID", () => {
-  const response = { code: 0, data: { username: "小明", avatarUrl: "https://example.com/avatar.png", openid: "private", activityId: "A123" }, message: "success" };
-  const { elements } = runPageWithResponse(JSON.stringify(response), 200);
-  assert.equal(elements.profile.hidden, false);
-  assert.equal(elements["user-name"].textContent, "小明");
-  assert.equal(elements["activity-id"].textContent, "A123");
-  assert.equal(elements.avatar.src, "https://example.com/avatar.png");
-  elements.avatar.onload();
-  assert.equal(elements.avatar.hidden, false);
-  assert.equal(elements["avatar-fallback"].hidden, true);
-  assert.deepEqual(JSON.parse(elements.result.textContent), response);
+test("从 hash 或 query 读取 ticket，忽略其他参数", () => {
+  assert.equal(ticketFromLocation({ search: "", hash: "#ticket=v1.k1.test%2Dvalue&x=1" }), "v1.k1.test-value");
+  assert.equal(ticketFromLocation({ search: "?ticket=query", hash: "#ticket=hash" }), "query");
+  assert.equal(ticketFromLocation({ search: "", hash: "" }), "");
+});
+
+test("创建设置按后端规则校验，默认值可用", () => {
+  assert.deepEqual(validateSettings(DEFAULT_SETTINGS), DEFAULT_SETTINGS);
+  assert.throws(() => validateSettings({ ...DEFAULT_SETTINGS, startingStack: 100 }), /20 倍/);
+  assert.throws(() => validateSettings({ ...DEFAULT_SETTINGS, maxSeats: 10 }), /2–9/);
+  assert.throws(() => validateSettings({ ...DEFAULT_SETTINGS, bigBlind: 1 }), /大盲注/);
+});
+
+test("API 错误优先显示服务端说明", () => {
+  assert.deepEqual(responseData({ code: 0, data: { entryState: "ROOM_READY" } }, 200), { entryState: "ROOM_READY" });
+  assert.throws(() => responseData({ code: 409, errorMsg: "配置不可修改" }, 409), /配置不可修改/);
 });
