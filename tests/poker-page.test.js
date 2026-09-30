@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
-import { ticketFromLocation, ticketFragmentUrl, validateSettings, redactCredentials } from "../src/poker-entry.js";
+import { webcrypto } from "node:crypto";
+import { ticketFromLocation, ticketFragmentUrl, validateSettings, redactCredentials, normalizeWebSocketUrl } from "../src/poker-entry.js";
 
 const script = readFileSync(new URL("../src/p.js", import.meta.url), "utf8").replace(/^import .*;\n/gm, "");
 
@@ -17,25 +18,39 @@ function element() {
   };
 }
 
-function mount(responses, initialToken = "") {
+function mount(responses, initialToken = "", options = {}) {
   const ids = ["message", "system-version", "login-panel", "waiting-panel", "create-panel",
     "closed-panel", "error-panel", "error-detail", "room-panel", "connection-panel", "login-form", "access-token", "create-form",
     "create-room", "refresh-entry", "retry-entry", "connect-ws", "copy-ws-url", "settings-error", "activity-panel",
     "activity-title", "activity-id", "activity-status", "self-name", "self-role", "activity-count",
     "room-title", "room-id", "room-status", "room-member-count", "online-count", "seated-count",
     "self-state", "room-settings", "members-list", "ws-url", "protocol-version", "ws-expires",
-    "ws-status", "debug-endpoint", "debug-request", "debug-response"];
+    "ws-status", "ws-detail", "debug-endpoint", "debug-request", "debug-response"];
   const elements = Object.fromEntries(ids.map((id) => [id, element()]));
   const calls = [];
+  const sockets = [];
+  const copied = [];
+  const intervals = new Map();
+  let timerId = 0;
+  class FakeWebSocket {
+    static OPEN = 1;
+    constructor(url) { this.url = url; this.sent = []; this.readyState = 0; sockets.push(this); }
+    send(value) { this.sent.push(JSON.parse(value)); }
+    close() { this.readyState = 3; this.onclose?.({ code: 1000, reason: "" }); }
+    open() { this.readyState = 1; this.onopen(); }
+    receive(frame) { this.onmessage({ data: JSON.stringify(frame) }); }
+  }
   const storage = new Map(initialToken ? [["poker-entry-access-token", initialToken]] : []);
   class FakeFormData {
     constructor(form) { this.entries = Object.entries(form.fields || {}); }
     [Symbol.iterator]() { return this.entries[Symbol.iterator](); }
   }
   runInNewContext(script, {
-    POKER_API_BASE_URL: "https://api.example.com",
-    ticketFromLocation, ticketFragmentUrl, validateSettings, redactCredentials,
-    window: { location: { href: "https://example.com/p.html#ticket=v1.k1.test", search: "", hash: "#ticket=v1.k1.test" } },
+    POKER_API_BASE_URL: options.apiBase || "https://api.example.com",
+    ticketFromLocation, ticketFragmentUrl, validateSettings, redactCredentials, normalizeWebSocketUrl,
+    window: { location: { href: "https://example.com/p.html#ticket=v1.k1.test", protocol: "https:", search: "", hash: "#ticket=v1.k1.test" } },
+    WebSocket: FakeWebSocket, crypto: webcrypto,
+    navigator: { clipboard: { async writeText(value) { copied.push(value); } } },
     document: { getElementById(id) { return elements[id]; }, createElement: element },
     history: { replaceState() {} },
     sessionStorage: {
@@ -53,9 +68,11 @@ function mount(responses, initialToken = "") {
         text: async () => JSON.stringify(next.body) };
     },
     AbortController, URL, URLSearchParams, Date, JSON,
-    setTimeout: () => 1, clearTimeout() {}, setInterval: () => 1, clearInterval() {},
+    setTimeout: () => 1, clearTimeout() {},
+    setInterval(fn) { const id = ++timerId; intervals.set(id, fn); return id; },
+    clearInterval(id) { intervals.delete(id); },
   });
-  return { elements, calls, storage };
+  return { elements, calls, storage, sockets, copied, intervals };
 }
 
 const version = "20260930112134";
@@ -153,4 +170,116 @@ test("创建人选择配置建房后显示房间和 WebSocket 链接", async () 
   assert.equal(elements["ws-url"].textContent, "wss://api.example.com/ws/poker/v1");
   assert.equal(elements["system-version"].textContent, version);
   assert.doesNotMatch(elements["debug-response"].textContent, /secret/);
+});
+
+const cloudBase = "https://springboot-thzo-281960-9-1453811837.sh.run.tcloudbase.com";
+const publicWsUrl = cloudBase.replace("https:", "wss:") + "/ws/poker/v1";
+function roomResponse(connectionOverrides = {}, dataOverrides = {}) {
+  return { status: 200, body: { code: 0, message: "success", systemVersion: version,
+    data: { entryState: "ROOM_READY", activity, self, counts,
+      room: { roomId: "A123", name: "周末牌局", status: "WAITING" },
+      connection: { url: publicWsUrl.replace("/ws/", ":80/ws/"), wsToken: "secret",
+        protocolVersion: 1, expiresAt: new Date(Date.now() + 60000).toISOString(), ...connectionOverrides },
+      ...dataOverrides } } };
+}
+
+test("仅修正与 HTTPS API 同域的云托管 WSS 80 端口，保留路径和查询参数", () => {
+  assert.equal(normalizeWebSocketUrl(publicWsUrl.replace("/ws/", ":80/ws/") + "?v=1", cloudBase), publicWsUrl + "?v=1");
+  for (const url of [
+    publicWsUrl, publicWsUrl.replace("/ws/", ":8443/ws/"),
+    "wss://custom.example.com:80/ws/poker/v1", "ws://localhost:80/ws/poker/v1",
+  ]) assert.equal(normalizeWebSocketUrl(url, cloudBase), new URL(url).href);
+  const otherHost = "wss://other.sh.run.tcloudbase.com:80/ws/poker/v1";
+  assert.equal(normalizeWebSocketUrl(otherHost, cloudBase), otherHost);
+});
+
+test("展示、复制、连接使用修正后的云托管地址，并完成 AUTH、心跳及房间同步", async () => {
+  const { elements, sockets, copied, intervals } = mount([roomResponse()], "", { apiBase: cloudBase });
+  await new Promise(setImmediate);
+  assert.equal(elements["ws-url"].textContent, publicWsUrl);
+  assert.match(elements["debug-response"].textContent, /:80\/ws/);
+  await elements["copy-ws-url"].listeners.click();
+  assert.deepEqual(copied, [publicWsUrl]);
+  await elements["connect-ws"].listeners.click();
+  assert.equal(sockets.length, 1);
+  const socket = sockets[0];
+  assert.equal(socket.url, publicWsUrl);
+  socket.open();
+  assert.equal(elements["ws-status"].textContent, "正在认证");
+  assert.equal(socket.sent[0].type, "AUTH");
+  assert.deepEqual(socket.sent[0].payload, { wsToken: "secret" });
+  assert.ok(socket.sent[0].requestId);
+  socket.receive({ type: "AUTH_OK", systemVersion: "20260930200000" });
+  assert.equal(elements["ws-status"].textContent, "已连接");
+  assert.equal(elements["system-version"].textContent, "20260930200000");
+  assert.equal(intervals.size, 1);
+  [...intervals.values()][0]();
+  assert.equal(socket.sent[1].type, "PING");
+  socket.receive({ type: "SNAPSHOT", payload: { counts: { ...counts, onlineCount: 1 } } });
+  assert.equal(elements["online-count"].textContent, "1");
+  socket.onclose({ code: 4001, reason: "AUTH_TIMEOUT" });
+  assert.match(elements["ws-detail"].textContent, /4001.*AUTH_TIMEOUT/);
+  assert.equal(intervals.size, 0);
+});
+
+test("过期凭证通过主入口刷新，使用新 wsToken 认证", async () => {
+  const { elements, calls, sockets } = mount([
+    roomResponse({ expiresAt: "2000-01-01T00:00:00Z" }),
+    roomResponse({ wsToken: "fresh-secret" }),
+  ], "", { apiBase: cloudBase });
+  await new Promise(setImmediate);
+  await elements["connect-ws"].listeners.click();
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].url, cloudBase + "/api/poker/v1/entry");
+  sockets[0].open();
+  assert.equal(sockets[0].sent[0].payload.wsToken, "fresh-secret");
+});
+
+test("刷新后房间已关闭或凭证仍过期时不建立 WebSocket", async () => {
+  for (const next of [
+    roomResponse({}, { entryState: "ROOM_CLOSED", connection: null }),
+    roomResponse({ expiresAt: "2000-01-01T00:00:00Z" }),
+  ]) {
+    const { elements, sockets } = mount([
+      roomResponse({ expiresAt: "2000-01-01T00:00:00Z" }), next,
+    ], "", { apiBase: cloudBase });
+    await new Promise(setImmediate);
+    await elements["connect-ws"].listeners.click();
+    assert.equal(sockets.length, 0);
+  }
+});
+
+test("握手和认证错误在后续 close 事件后仍可见", async () => {
+  const { elements, sockets } = mount([roomResponse()], "", { apiBase: cloudBase });
+  await new Promise(setImmediate);
+  await elements["connect-ws"].listeners.click();
+  sockets[0].onerror();
+  sockets[0].onclose({ code: 1006, reason: "" });
+  assert.equal(elements["ws-status"].textContent, "连接错误");
+  assert.match(elements["ws-detail"].textContent, /TLS.*1006/);
+  await elements["connect-ws"].listeners.click();
+  sockets[1].open();
+  sockets[1].receive({ type: "AUTH_EXPIRED", payload: { message: "连接凭证已过期" } });
+  sockets[1].onclose({ code: 4001, reason: "AUTH_EXPIRED" });
+  assert.match(elements["ws-detail"].textContent, /连接凭证已过期.*4001.*AUTH_EXPIRED/);
+  assert.equal(elements["ws-status"].textContent, "连接错误");
+});
+
+test("HTTPS 页面拒绝明文 WS 地址，旧连接事件不影响新连接", async () => {
+  const invalid = mount([roomResponse({ url: "ws://localhost/ws/poker/v1" })]);
+  await new Promise(setImmediate);
+  await invalid.elements["connect-ws"].listeners.click();
+  assert.equal(invalid.sockets.length, 0);
+  assert.equal(invalid.elements["ws-status"].textContent, "连接地址无效");
+
+  const { elements, sockets, intervals } = mount([roomResponse()], "", { apiBase: cloudBase });
+  await new Promise(setImmediate);
+  await elements["connect-ws"].listeners.click();
+  await elements["connect-ws"].listeners.click();
+  sockets[1].open();
+  sockets[1].receive({ type: "AUTH_OK" });
+  sockets[0].onerror();
+  sockets[0].onclose({ code: 1006, reason: "" });
+  assert.equal(elements["ws-status"].textContent, "已连接");
+  assert.equal(intervals.size, 1);
 });

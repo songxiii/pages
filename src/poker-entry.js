@@ -14,6 +14,18 @@ export function ticketFragmentUrl(location) {
   return url.pathname + url.search + url.hash;
 }
 
+export function normalizeWebSocketUrl(value, apiBase) {
+  const url = new URL(value);
+  const api = new URL(apiBase);
+  // CloudBase responses may include :80 even though the public endpoint uses HTTPS.
+  if (url.protocol === "wss:" && url.port === "80"
+      && api.protocol === "https:" && url.hostname === api.hostname
+      && url.hostname.endsWith(".run.tcloudbase.com")) {
+    url.port = api.port;
+  }
+  return url.href;
+}
+
 export function validateSettings(raw) {
   const settings = {};
   for (const key of ["maxSeats", "seatingType", "smallBlind", "bigBlind", "startingStack", "turnSeconds"]) {

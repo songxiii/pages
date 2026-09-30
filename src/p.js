@@ -1,5 +1,5 @@
 import { POKER_API_BASE_URL } from "./poker-config.js";
-import { ticketFromLocation, ticketFragmentUrl, validateSettings, redactCredentials } from "./poker-entry.js";
+import { ticketFromLocation, ticketFragmentUrl, validateSettings, redactCredentials, normalizeWebSocketUrl } from "./poker-entry.js";
 
 const $ = (id) => document.getElementById(id);
 const apiBase = POKER_API_BASE_URL.replace(/\/$/, "");
@@ -249,7 +249,10 @@ function renderRoom() {
     people.append(element);
   }
   connection = view.connection || connection;
-  text("ws-url", connection?.url || "服务端未返回连接地址");
+  let wsUrl = connection?.url;
+  try { if (wsUrl) wsUrl = normalizeWebSocketUrl(wsUrl, apiBase); }
+  catch { /* Keep invalid server URLs visible for diagnosis. */ }
+  text("ws-url", wsUrl || "服务端未返回连接地址");
   text("protocol-version", connection?.protocolVersion ?? "—");
   text("ws-expires", connection?.expiresAt ? new Date(connection.expiresAt).toLocaleString("zh-CN") : "—");
   $("connect-ws").disabled = !connection?.url || !connection?.wsToken;
@@ -268,22 +271,42 @@ async function connectWebSocket() {
   if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
     if (!await enterRoom()) return;
   }
+  if (!["ROOM_READY", "ROOM_CREATED"].includes(view?.entryState)
+      || !connection?.url || !connection?.wsToken) return;
+  if (Date.parse(connection.expiresAt) <= Date.now()) {
+    setWsStatus("凭证已过期");
+    text("ws-detail", "服务端返回的连接凭证已过期，请重新请求主入口。");
+    return;
+  }
+  const attemptConnection = { ...connection };
   clearSocket();
   let url;
   try {
-    url = new URL(connection.url);
+    url = new URL(normalizeWebSocketUrl(attemptConnection.url, apiBase));
     if (!["wss:", "ws:"].includes(url.protocol)
         || (window.location.protocol === "https:" && url.protocol !== "wss:")) throw new Error();
-  } catch { setWsStatus("连接地址无效"); return; }
+  } catch {
+    setWsStatus("连接地址无效");
+    text("ws-detail", "请检查服务端返回的 WebSocket 地址；HTTPS 页面需要 wss:// 地址。");
+    return;
+  }
   const epoch = ++socketEpoch;
+  let failure = "";
   setWsStatus("正在连接");
+  text("ws-detail", "正在连接 " + url.href);
   try { socket = new WebSocket(url.href); }
-  catch { setWsStatus("连接失败"); return; }
+  catch {
+    setWsStatus("连接失败");
+    text("ws-detail", "无法建立连接，请检查 WebSocket 地址。");
+    return;
+  }
   const current = socket;
   current.onopen = () => {
     if (epoch !== socketEpoch) return;
+    setWsStatus("正在认证");
+    text("ws-detail", "连接已建立，正在验证连接凭证…");
     current.send(JSON.stringify({ type: "AUTH", requestId: requestId(),
-      payload: { wsToken: connection.wsToken } }));
+      payload: { wsToken: attemptConnection.wsToken } }));
   };
   current.onmessage = (event) => {
     if (epoch !== socketEpoch) return;
@@ -292,6 +315,7 @@ async function connectWebSocket() {
     if (frame.systemVersion) updateSystemVersion(frame.systemVersion);
     if (frame.type === "AUTH_OK") {
       setWsStatus("已连接");
+      text("ws-detail", "认证成功，正在同步房间状态。");
       clearInterval(pingTimer);
       pingTimer = setInterval(() => {
         if (current.readyState === WebSocket.OPEN) current.send(JSON.stringify({
@@ -302,17 +326,25 @@ async function connectWebSocket() {
       view = { ...view, ...frame.payload, connection };
       renderRoom();
     } else if (frame.type === "ERROR" || frame.type === "AUTH_EXPIRED") {
-      message(frame.payload?.message || "WebSocket 连接失败", true);
+      failure = frame.payload?.message || "WebSocket 连接失败";
+      message(failure, true);
+      text("ws-detail", failure);
       setWsStatus("连接错误");
     }
   };
-  current.onerror = () => { if (epoch === socketEpoch) setWsStatus("连接失败"); };
-  current.onclose = () => {
+  current.onerror = () => {
+    if (epoch !== socketEpoch) return;
+    failure = "连接失败，请检查服务端公网 WSS 地址、TLS 和允许的 Origin。";
+    setWsStatus("连接失败");
+    text("ws-detail", failure);
+  };
+  current.onclose = (event) => {
     if (epoch !== socketEpoch) return;
     clearInterval(pingTimer);
     pingTimer = null;
     socket = null;
-    setWsStatus("已断开");
+    setWsStatus(failure ? "连接错误" : "已断开");
+    text("ws-detail", [failure, "连接已关闭（" + event.code + "）", event.reason].filter(Boolean).join(" · "));
   };
 }
 
@@ -328,7 +360,7 @@ $("retry-entry").addEventListener("click", enterRoom);
 $("connect-ws").addEventListener("click", connectWebSocket);
 $("copy-ws-url").addEventListener("click", async () => {
   if (!connection?.url) return;
-  try { await navigator.clipboard.writeText(connection.url); message("WebSocket 链接已复制。"); }
+  try { await navigator.clipboard.writeText(normalizeWebSocketUrl(connection.url, apiBase)); message("WebSocket 链接已复制。"); }
   catch { message("复制失败，请手动选择链接。", true); }
 });
 if (ticket) enterRoom();
