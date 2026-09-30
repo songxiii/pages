@@ -12,7 +12,7 @@ function element() {
   return {
     value: "", textContent: "", hidden: true, disabled: false, className: "", children: [],
     listeners: {}, attributes: {}, clientWidth: 400, clientHeight: 650,
-    style: { setProperty() {} },
+    style: { values: {}, setProperty(name, value) { this.values[name] = value; } },
     classList: { toggle() {} },
     setAttribute(name, value) { this.attributes[name] = value; },
     remove() { this.removed = true; },
@@ -355,4 +355,27 @@ test("旁观者不可行动；服务端授权后才显示入座准备选项；�
   sockets[0].receive({ type: "ROOM_CLOSED" });
   assert.equal(elements["closed-panel"].hidden, false);
   assert.equal(elements["room-panel"].hidden, true);
+});
+
+test("本人换座后仍在正下方，D/SB/BB 随最新牌局正确换位，双人可同时显示庄位与小盲", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const first = gameSnapshot({ room: { settings: { maxSeats: 2 } } });
+  sockets[0].receive({ type: "SNAPSHOT", payload: first });
+  let seats = elements["table-seats"].children;
+  assert.equal(seats.length, 2);
+  const selfSeat = seats.find((seat) => seat.className.includes(" self"));
+  assert.equal(selfSeat.style.values["--x"], "50%");
+  assert.equal(selfSeat.style.values["--y"], "89%");
+  const badges = (seat) => descendants(seat).filter((node) => node.className.startsWith("seat-marker ")).map((node) => node.textContent);
+  assert.deepEqual(badges(seats.find((seat) => seat.attributes["data-seat-index"] === "1")), ["D", "SB"]);
+  assert.deepEqual(badges(selfSeat), ["BB"]);
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: 2, self: { ...first.self, seatIndex: 1 }, game: { ...first.game, dealer: 0, smallBlindSeat: 0, bigBlindSeat: 1 } } });
+  seats = elements["table-seats"].children;
+  assert.equal(seats[0].attributes["data-seat-index"], "1");
+  assert.equal(seats[0].style.values["--x"], "50%");
+  assert.deepEqual(badges(seats[0]), ["BB"]);
+  assert.deepEqual(badges(seats[1]), ["D", "SB"]);
+  assert.equal(descendants(seats[0]).find((node) => node.className === "seat-position").textContent, "BB");
+  assert.equal(descendants(seats[1]).find((node) => node.className === "seat-position").textContent, "SB");
 });

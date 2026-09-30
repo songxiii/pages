@@ -94,7 +94,7 @@ Java 校验 token 所属用户、活动和房间后，依次发送 `AUTH_OK` 与
       {"userId":"u1","nickname":"小红","seatIndex":1,"stack":198,"state":"IN_HAND","online":true}
     ],
     "game":{
-      "handId":"A123-H8","handNumber":8,"phase":"preflop","board":[],"dealer":0,"turn":0,"pot":3,
+      "handId":"A123-H8","handNumber":8,"phase":"preflop","board":[],"dealer":0,"smallBlindSeat":0,"bigBlindSeat":1,"turn":0,"pot":3,
       "turnDeadline":"2026-09-30T13:30:30.000Z",
       "players":[
         {"userId":"u0","seatIndex":0,"nickname":"小明","position":"SB","stack":199,"bet":1,"folded":false,"allIn":false,"hole":["Jc","7h"]},
@@ -111,6 +111,8 @@ Java 校验 token 所属用户、活动和房间后，依次发送 `AUTH_OK` 与
 - `seatIndex` 从 **0** 开始，空位不在成员/玩家列表里；旁观者 `self.seatIndex=null`。请不要把用户 ID 当座位号。前端兼容旧演示 `game.players[].id` 是座位的情形；活动协议请使用明确的 `seatIndex`。
 - `game=null` 表示尚未开局；结束后可保留 `phase=complete` 的结算局面。`phase` 是 `preflop` / `flop` / `turn` / `river` / `complete`。
 - `handId` 每手唯一。新手触发两轮从桌心飞向座位的发牌动画，公共牌新增时翻牌；同手普通更新不重复发牌。
+- 前端按 `room.settings.maxSeats` 选用 2–9 人布局，保留空座。本人 `self.seatIndex` 始终旋转到屏幕正下方，其他座位按服务端座位顺序排列；旋转不改变命令中的真实座位编号。旁观者以 0 号座位为底部锚点。
+- `dealer`、`smallBlindSeat`、`bigBlindSeat` 分别标记庄家 D、小盲 SB、大盲 BB，都是零基座位号。请 Java 在每手快照明确提供这三个字段，特殊规则下没有对应位置时明确返回 `null`。双人局庄家与小盲在同一座位，前端同时显示 D 和 SB。兼容旧快照：盲位优先从 `players[].position=SB/BB` 读取，否则根据本手 `game.players` 的参局座位与庄家推导，跳过空座，已弃牌者仍保留本手盲位；不会用下注额猜盲位。
 - `turn` 和 `dealer` 都是座位号。`turnDeadline` 为 UTC/带时区 ISO 时间，前端显示剩余行动秒数，超时动作由 Java 执行。
 - `pot` 是服务端计算的当前总底池。`bet` 是该玩家本轮总下注，`stack` 是尚未下注的筹码；不要只传动作增量。
 - 未摊牌时对手底牌只传 `[null,null]`，本人可传 `Jc`、`7h` 等编码。旁观连接隐藏所有未公开底牌。禁止把牌堆、随机种子或全房间未公开底牌发给浏览器。

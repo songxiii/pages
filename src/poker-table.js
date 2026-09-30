@@ -1,7 +1,17 @@
 // Activity table: the server owns cards, money, turns and legal actions.
 export const PHASE_NAMES = { preflop: "翻牌前", flop: "翻牌", turn: "转牌", river: "河牌", complete: "本局结束" };
-const POSITIONS = [[27, 89], [11, 70], [11, 48], [16, 28], [35, 14], [65, 14], [84, 28], [89, 48], [89, 70]];
-const SLOTS = { 2: [0, 5], 3: [0, 3, 6], 4: [0, 2, 5, 7], 5: [0, 2, 4, 6, 8], 6: [0, 2, 4, 5, 6, 8], 7: [0, 1, 2, 4, 5, 6, 7], 8: [0, 1, 2, 3, 4, 5, 6, 7], 9: [0, 1, 2, 3, 4, 5, 6, 7, 8] };
+// Clockwise visual order starts with the receiving player's seat at bottom center.
+// Each capacity has its own balanced layout; unoccupied seats keep their places.
+const SEAT_LAYOUTS = {
+  2: [[50, 89], [50, 14]],
+  3: [[50, 89], [13, 32], [87, 32]],
+  4: [[50, 89], [11, 49], [50, 14], [89, 49]],
+  5: [[50, 89], [11, 62], [27, 20], [73, 20], [89, 62]],
+  6: [[50, 89], [11, 64], [18, 30], [50, 14], [82, 30], [89, 64]],
+  7: [[50, 89], [11, 70], [11, 44], [34, 16], [66, 16], [89, 44], [89, 70]],
+  8: [[50, 89], [11, 73], [11, 48], [25, 23], [50, 13], [75, 23], [89, 48], [89, 73]],
+  9: [[50, 89], [11, 74], [11, 53], [11, 32], [34, 13], [66, 13], [89, 32], [89, 53], [89, 74]],
+};
 export const formatChips = (value) => Number.isFinite(Number(value)) ? Number(value).toLocaleString("zh-CN", { maximumFractionDigits: 2 }) : "—";
 const identity = (member) => member?.userId ?? member?.id;
 export function seatIndex(player) { return player?.seatIndex ?? player?.seat ?? null; }
@@ -16,7 +26,24 @@ export function ownSeat(view) {
 }
 export function tableLayout(count, selfSeat = null) {
   const size = Math.min(9, Math.max(2, Math.floor(Number(count)) || 6));
-  return SLOTS[size].map((slot, index) => ({ seatIndex: (index + (selfSeat ?? 0)) % size, x: POSITIONS[slot][0], y: POSITIONS[slot][1] }));
+  const anchor = Number.isInteger(selfSeat) && selfSeat >= 0 && selfSeat < size ? selfSeat : 0;
+  return SEAT_LAYOUTS[size].map(([x, y], index) => ({ seatIndex: (index + anchor) % size, x, y }));
+}
+// Prefer authoritative hand roles; the fallback uses participants, not room capacity
+// or bet amounts (which change after raises). Explicit null supports a dead button.
+export function handPositions(game) {
+  if (!game) return { dealer: null, smallBlindSeat: null, bigBlindSeat: null };
+  const validSeat = (value) => value != null && Number.isInteger(Number(value)) && Number(value) >= 0 && Number(value) < 9 ? Number(value) : null;
+  const players = (game.players || []).map((player) => ({ ...player, seatIndex: validSeat(player.seatIndex ?? player.seat ?? player.id) }));
+  const seats = [...new Set(players.map((player) => player.seatIndex).filter((seat) => seat !== null))].sort((a, b) => a - b);
+  const taggedSeat = (position) => players.find((player) => String(player.position || "").toUpperCase() === position)?.seatIndex ?? null;
+  const dealer = Object.hasOwn(game, "dealer") ? validSeat(game.dealer) : taggedSeat("BTN");
+  const afterDealer = dealer === null ? [] : [...seats.filter((seat) => seat > dealer), ...seats.filter((seat) => seat <= dealer)];
+  const smallBlindSeat = Object.hasOwn(game, "smallBlindSeat") ? validSeat(game.smallBlindSeat)
+    : taggedSeat("SB") ?? (seats.length >= 2 && dealer !== null ? (seats.length === 2 && seats.includes(dealer) ? dealer : afterDealer[0]) : null);
+  const bigBlindSeat = Object.hasOwn(game, "bigBlindSeat") ? validSeat(game.bigBlindSeat)
+    : taggedSeat("BB") ?? (seats.length >= 2 && dealer !== null ? (seats.length === 2 ? afterDealer[0] : afterDealer[1]) : null);
+  return { dealer, smallBlindSeat, bigBlindSeat };
 }
 export function raisePresets(game) {
   const legal = game?.legal;
@@ -36,6 +63,7 @@ export function createPokerTable({ document, onAction, onCommand }) {
   const $ = (id) => document.getElementById(id);
   let view = {}, game = null, connected = false, pending = false, pendingTimer = null;
   let lastHand = null, lastBoard = [], timer = null, deadline = null, currentTimer = null, currentSeconds = null;
+  let lastLayoutKey = null, dealCleanupTimer = null;
   const node = (tag, className, value) => {
     const el = document.createElement(tag); el.className = className;
     if (value != null) el.textContent = String(value);
@@ -112,6 +140,12 @@ export function createPokerTable({ document, onAction, onCommand }) {
     const handKey = game?.handId ?? game?.handNumber ?? null;
     const newHand = handKey !== null && handKey !== lastHand;
     const layout = tableLayout(count, selfSeat);
+    const roles = handPositions(game);
+    const layoutKey = layout.length + ":" + selfSeat;
+    if (layoutKey !== lastLayoutKey) {
+      clearTimeout(dealCleanupTimer); $("deal-layer").replaceChildren(); lastLayoutKey = layoutKey;
+    }
+    $("table-stage").setAttribute("data-seat-count", String(layout.length));
     const seats = $("table-seats"); seats.replaceChildren();
     const seatPicker = $("seat-picker"); seatPicker.replaceChildren();
     currentTimer = null; currentSeconds = null;
@@ -123,18 +157,27 @@ export function createPokerTable({ document, onAction, onCommand }) {
       const current = game?.turn === place.seatIndex && game?.phase !== "complete";
       const el = node("div", "seat" + (!person ? " empty" : "") + (mine ? " self" : "")
         + (current ? " current" : "") + (person?.folded ? " folded" : "") + (person?.online === false ? " offline" : "")
-        + (place.x > 50 ? " right" : "") + (place.y < 20 ? " top" : ""));
+        + (place.x > 50 ? " right" : "") + (place.y < 25 ? " top" : "") + (place.y > 85 ? " bottom" : ""));
+      el.setAttribute("data-seat-index", String(place.seatIndex));
       el.style.setProperty("--x", place.x + "%"); el.style.setProperty("--y", place.y + "%"); el.style.setProperty("--hue", String((place.seatIndex * 59 + 220) % 360));
       const name = person?.nickname || person?.name || member?.nickname || "玩家";
       const avatar = node("div", "seat-avatar"); avatar.append(node("span", "avatar-monogram", person ? [...name][0] : "+"));
       const avatarUrl = safeAvatar(person?.avatarUrl || member?.avatarUrl);
       if (avatarUrl) { const img = node("img", ""); img.src = avatarUrl; img.alt = ""; img.referrerPolicy = "no-referrer"; img.addEventListener("error", () => img.remove()); avatar.append(img); }
       const label = node("div", "seat-label");
-      if (person?.position) label.append(node("span", "seat-position", person.position));
+      const rolePosition = place.seatIndex === roles.smallBlindSeat ? "SB" : place.seatIndex === roles.bigBlindSeat ? "BB" : place.seatIndex === roles.dealer ? "BTN" : null;
+      const position = rolePosition || (!["SB", "BB", "BTN", "D"].includes(String(person?.position || "").toUpperCase()) ? person?.position : null);
+      if (position) label.append(node("span", "seat-position", position));
       label.append(node("span", "seat-name", person ? name : "空座 " + (place.seatIndex + 1)));
       if (person) label.append(node("strong", "seat-stack", formatChips(person.stack)));
       if (person?.folded || person?.allIn || person?.online === false) label.append(node("span", "seat-state", person.folded ? "已弃牌" : person.allIn ? "ALL IN" : "离线"));
-      if (game?.dealer != null && Number(game.dealer) === place.seatIndex) label.append(node("span", "dealer-button", "D"));
+      const markers = node("div", "seat-markers");
+      for (const [role, seat, title] of [["D", roles.dealer, "庄家"], ["SB", roles.smallBlindSeat, "小盲"], ["BB", roles.bigBlindSeat, "大盲"]]) {
+        if (seat !== place.seatIndex) continue;
+        const badge = node("span", "seat-marker " + (role === "D" ? "dealer-button" : role === "SB" ? "small-blind-marker" : "big-blind-marker"), role);
+        badge.setAttribute("title", title); badge.setAttribute("aria-label", title); markers.append(badge);
+      }
+      if (markers.children.length) label.append(markers);
       el.append(avatar);
       if (player?.hole?.length) {
         const hole = node("div", "hole-cards");
@@ -168,6 +211,7 @@ export function createPokerTable({ document, onAction, onCommand }) {
     lastHand = handKey; lastBoard = [...cards]; updateActions();
   }
   function animateDeal(layout) {
+    clearTimeout(dealCleanupTimer);
     const layer = $("deal-layer"); layer.replaceChildren();
     const stage = $("table-stage");
     for (let round = 0; round < 2; round++) layout.forEach((place, index) => {
@@ -178,7 +222,7 @@ export function createPokerTable({ document, onAction, onCommand }) {
       el.style.setProperty("--delay", (round * layout.length + index) * 85 + "ms");
       el.addEventListener("animationend", () => el.remove()); layer.append(el);
     });
-    setTimeout(() => layer.replaceChildren(), 2500);
+    dealCleanupTimer = setTimeout(() => layer.replaceChildren(), 2500);
   }
   $("fold-action").addEventListener("click", () => act("fold"));
   $("call-action").addEventListener("click", () => act(game?.legal?.canCheck ? "check" : "call"));
@@ -205,6 +249,6 @@ export function createPokerTable({ document, onAction, onCommand }) {
     render,
     setConnected(value, notice) { connected = value; updateActions(); if (notice) $("table-notice").textContent = notice; },
     reject(message) { clearTimeout(pendingTimer); pending = false; updateActions(); $("table-notice").textContent = message; },
-    reset() { clearInterval(timer); clearTimeout(pendingTimer); lastHand = null; lastBoard = []; connected = false; pending = false; updateActions(); },
+    reset() { clearInterval(timer); clearTimeout(pendingTimer); clearTimeout(dealCleanupTimer); $("deal-layer").replaceChildren(); lastLayoutKey = null; lastHand = null; lastBoard = []; connected = false; pending = false; updateActions(); },
   };
 }
