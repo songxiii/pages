@@ -103,7 +103,13 @@ export function roomControls(view) {
     canResume: host && paused && !inHand && seated.length >= 2 && allowed.includes("RESUME_GAME"),
   };
 }
-function safeAvatar(url) {
+export function memberAmounts(member) {
+  const amount = (value) => value !== null && value !== undefined && value !== "" && typeof value !== "boolean"
+    && Number.isFinite(Number(value)) ? Number(value) : null;
+  const totalBuyIn = amount(member.totalBuyIn), stack = amount(member.stack);
+  return { totalBuyIn, netChips: amount(member.netChips) ?? (totalBuyIn !== null && stack !== null ? stack - totalBuyIn : null) };
+}
+export function safeAvatar(url) {
   try { const parsed = new URL(url); return ["https:", "http:"].includes(parsed.protocol) ? parsed.href : null; }
   catch { return null; }
 }
@@ -298,6 +304,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
       el.style.setProperty("--x", place.x + "%"); el.style.setProperty("--y", place.y + "%"); el.style.setProperty("--hue", String((place.seatIndex * 59 + 220) % 360));
       const name = person?.nickname || person?.name || member?.nickname || (mine ? view.self?.nickname : null) || "玩家";
       const avatar = node("div", "seat-avatar"); avatar.append(node("span", "avatar-monogram", person ? [...name][0] : "+"));
+      if (person) el.append(node("span", "seat-number", (place.seatIndex + 1) + "号"));
       const avatarUrl = safeAvatar(person?.avatarUrl || member?.avatarUrl || (mine ? view.self?.avatarUrl : null));
       if (avatarUrl) { const img = node("img", ""); img.src = avatarUrl; img.alt = ""; img.referrerPolicy = "no-referrer"; img.addEventListener("error", () => img.remove()); avatar.append(img); }
       const label = node("div", "seat-label");
@@ -339,7 +346,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     $("table-phase").textContent = game ? "第 " + (game.handNumber ?? "—") + " 手 · " + (PHASE_NAMES[game.phase] || "牌局进行中") : "等待开局";
     $("table-result").textContent = game?.result?.message || "";
     $("table-notice").textContent = !connected ? "正在同步牌局…" : roomControls(view).paused ? "游戏已暂停，等待房主继续"
-      : !game ? (selfSeat === null ? "点击虚线空座落座，由房主开始游戏" : "已入座，等待房主开始游戏")
+      : !game ? (selfSeat === null ? (Number(settings.seatingType) === 0 ? "点击任意空座随机落座，由房主开始游戏" : "点击虚线空座落座，由房主开始游戏") : "已入座 " + (selfSeat + 1) + " 号位，等待房主开始游戏")
       : selfSeat === null ? "你正在旁观本场牌局" : canAct() ? "轮到你行动" : game.phase === "complete" ? "本局结束，等待下一手" : "等待其他玩家行动";
     deadline = Date.parse(game?.turnDeadline || "");
     if (currentSeconds) currentSeconds.hidden = !Number.isFinite(deadline);

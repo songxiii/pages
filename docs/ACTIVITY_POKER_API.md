@@ -61,6 +61,12 @@ Java 已确认 entry/rooms 只要求请求体 ticket，票据允许转发，接�
 
 仅在 `p.html?debug=1#ticket=...` 的调试区可手动填写 token，正式页面不让普通用户粘贴技术凭证。调试请求和响应遮盖 ticket、Authorization、wsToken；系统版本放在房间菜单内。
 
+### 房间成员金额展示
+
+成员列表使用 `roomMembers[].avatarUrl/nickname/state/seatIndex/online/totalBuyIn/netChips`，当前 Java 视图已提供这些字段，不需要新增查询接口。头像为 30px，缺失、非法地址或加载失败时显示昵称首字。右侧 `netChips > 0` 显示红色「盈利 +金额」，小于零显示绿色「亏损 -金额」，等于零使用默认字体颜色显示 `0`；下方显示「累计带入 totalBuyIn」。每次完整 SNAPSHOT 同步刷新。
+
+缺失 `netChips` 时，仅在 `stack` 与 `totalBuyIn` 都有效时用两者差额兼容；金额缺失显示 `—`，不能误报零。累计带入只包含已到账金额，未结算的 `pendingBuyIn` 不混入。当前 Java 的 `netChips = stack - totalBuyIn` 是实时账面差额，手牌中已下注但未分配的底池会暂时体现为负数；若产品需要仅统计已完成手牌，Java 应将 `netChips` 改为结算后账本差额，并在下注期间保持上手结果，前端直接使用该值。
+
 ## 2. WebSocket 认证、心跳和快照
 
 使用入口返回的公网 WSS 地址，建立连接后立即发送：
@@ -139,6 +145,8 @@ Java 校验 token 所属用户、活动和房间后，依次发送 `AUTH_OK` 与
 | 房主继续已暂停游戏，至少两人落座 | **新增 `RESUME_GAME`** | `{"type":"RESUME_GAME","requestId":"uuid","payload":{}}` |
 
 ### 点击虚线空座
+
+桌上的头像角标和成员列表显示实际的 1 起座位号（`seatIndex + 1`），本人视觉位置始终旋转到正下方，不修改真实编号。随机房间点击任意空座都只申请随机分配，不指定点击的座位。若反复落座的快照仍始终返回 `self.seatIndex=0`，应核对线上 Java 版本、可用座位集合以及随机选择逻辑；当前本地 Java 源码使用 `SecureRandom.nextInt(empty.size())` 随机挑选空位。
 
 点击空座根据房间配置发送兼容当前 Java 的消息：`seatingType=1` 自选房间发送 `{"seatIndex":2}`，号码是服务端真实的零基座位号；`seatingType=0` 随机房间发送空 `payload={}`，由 Java 随机选择可用座位。新开房默认自主选座，既有随机房间仍可点击任意空座申请随机入座。
 

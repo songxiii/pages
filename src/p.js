@@ -1,4 +1,4 @@
-import { createPokerTable } from "./poker-table.js?v=20261001-portrait-raise-picker";
+import { createPokerTable, formatChips, safeAvatar, memberAmounts, seatIndex } from "./poker-table.js?v=20261001-member-balances";
 import { POKER_API_BASE_URL } from "./poker-config.js";
 import { ticketFromLocation, ticketFragmentUrl, validateSettings, redactCredentials, normalizeWebSocketUrl } from "./poker-entry.js";
 
@@ -304,7 +304,7 @@ function renderRoom() {
   const list = $("room-settings");
   list.replaceChildren();
   addDefinition(list, "座位上限", (settings.maxSeats || "—") + " 人");
-  addDefinition(list, "落座方式", settings.seatingType === 1 ? "自主选座" : "随机落座");
+  addDefinition(list, "落座方式", Number(settings.seatingType) === 1 ? "自主选座" : "随机落座");
   addDefinition(list, "盲注", number(settings.smallBlind) + " / " + number(settings.bigBlind));
   addDefinition(list, "初始筹码", number(settings.startingStack));
   addDefinition(list, "行动时限", (settings.turnSeconds || "—") + " 秒");
@@ -320,12 +320,39 @@ function renderRoom() {
   for (const member of members) {
     const element = document.createElement("div");
     element.className = "member";
+    const avatar = document.createElement("div");
+    avatar.className = "member-avatar";
+    const monogram = document.createElement("span");
+    monogram.textContent = [...(member.nickname || "房间成员")][0];
+    avatar.append(monogram);
+    const avatarUrl = safeAvatar(member.avatarUrl);
+    if (avatarUrl) {
+      const img = document.createElement("img");
+      img.src = avatarUrl; img.alt = ""; img.referrerPolicy = "no-referrer";
+      img.addEventListener("error", () => img.remove());
+      avatar.append(img);
+    }
+    const profile = document.createElement("div");
+    profile.className = "member-profile";
     const name = document.createElement("strong");
     name.textContent = member.nickname || "房间成员";
     const detail = document.createElement("small");
+    const seat = seatIndex(member);
     detail.textContent = (stateNames[member.state] || member.state || "旁观中")
-      + " · " + (member.online ? "在线" : "离线");
-    element.append(name, detail);
+      + (seat === null ? "" : " · " + (Number(seat) + 1) + "号位") + " · " + (member.online ? "在线" : "离线");
+    profile.append(name, detail);
+    const balance = document.createElement("div");
+    balance.className = "member-balance";
+    const { totalBuyIn, netChips } = memberAmounts(member);
+    const profit = document.createElement("strong");
+    profit.className = "member-profit" + (netChips > 0 ? " profit-positive" : netChips < 0 ? " profit-negative" : "");
+    profit.textContent = netChips === null ? "盈亏 —" : netChips > 0 ? "盈利 +" + formatChips(netChips)
+      : netChips < 0 ? "亏损 " + formatChips(netChips) : "0";
+    const buyIn = document.createElement("small");
+    buyIn.className = "member-buy-in";
+    buyIn.textContent = "累计带入 " + (totalBuyIn === null ? "—" : formatChips(totalBuyIn));
+    balance.append(profit, buyIn);
+    element.append(avatar, profile, balance);
     people.append(element);
   }
   table.render(view);

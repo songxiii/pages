@@ -1,6 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ownSeat, tableLayout, raisePresets, handPositions, seatIndex, buyInOptions } from "../src/poker-table.js";
+import { ownSeat, tableLayout, raisePresets, handPositions, seatIndex, buyInOptions, memberAmounts } from "../src/poker-table.js";
+
+test("成员盈亏优先使用服务字段，兼容账本差额，缺失金额不能冒充零", () => {
+  assert.deepEqual(memberAmounts({ totalBuyIn: 1000, stack: 800, netChips: 50 }), { totalBuyIn: 1000, netChips: 50 });
+  assert.deepEqual(memberAmounts({ totalBuyIn: "1000", stack: 800, pendingBuyIn: 400 }), { totalBuyIn: 1000, netChips: -200 });
+  assert.deepEqual(memberAmounts({ totalBuyIn: 0, netChips: 0 }), { totalBuyIn: 0, netChips: 0 });
+  for (const value of [undefined, null, "", true, "invalid", Infinity]) {
+    assert.deepEqual(memberAmounts({ totalBuyIn: value, netChips: value, stack: 200 }), { totalBuyIn: null, netChips: null });
+  }
+});
 
 test("2–9 人所有本人座位都在正下方，保留真实座位编号与顺序，布局左右平衡", () => {
   for (let count = 2; count <= 9; count++) {

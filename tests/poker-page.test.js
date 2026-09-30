@@ -742,3 +742,56 @@ test("加注先打开金额面板，快捷金额和全下只选择，确认后�
   assert.equal(sent[0].payload.action, "raise"); assert.equal(sent[0].payload.amount, 20);
   assert.equal(elements["raise-editor"].hidden, true);
 });
+
+test("成员列表展示头像、盈亏符号和累计带入，快照更新金额且缺失值不显示零", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const first = lobbySnapshot({ roomMembers: [
+    { userId: "a", nickname: "盈利成员", avatarUrl: "https://example.com/a.jpg", totalBuyIn: 1000, stack: 900, netChips: 120.5, online: true, seatIndex: 4, state: "SEATED" },
+    { userId: "b", nickname: "亏损成员", avatarUrl: "javascript:alert(1)", totalBuyIn: 800, stack: 700, netChips: -100 },
+    { userId: "c", nickname: "持平成员", totalBuyIn: 0, netChips: 0 },
+    { userId: "d", nickname: "缺少账本", stack: 200 },
+  ] });
+  sockets[0].receive({ type: "SNAPSHOT", payload: first });
+  const rows = elements["members-list"].children;
+  const find = (row, cls) => descendants(row).find((node) => node.className.split(" ").includes(cls));
+  assert.equal(find(rows[0], "member-profit").textContent, "盈利 +120.5");
+  assert.equal(find(rows[0], "member-profit").className, "member-profit profit-positive");
+  assert.equal(find(rows[0], "member-buy-in").textContent, "累计带入 1,000");
+  assert.ok(descendants(rows[0]).some((node) => node.textContent.includes("5号位")));
+  const image = descendants(rows[0]).find((node) => node.src);
+  assert.equal(image.src, "https://example.com/a.jpg");
+  image.listeners.error(); assert.equal(image.removed, true);
+  assert.equal(find(rows[1], "member-profit").textContent, "亏损 -100");
+  assert.equal(find(rows[1], "member-profit").className, "member-profit profit-negative");
+  assert.ok(!descendants(rows[1]).some((node) => node.src));
+  assert.equal(find(rows[2], "member-profit").textContent, "0");
+  assert.equal(find(rows[2], "member-profit").className, "member-profit");
+  assert.equal(find(rows[2], "member-buy-in").textContent, "累计带入 0");
+  assert.equal(find(rows[3], "member-profit").textContent, "盈亏 —");
+  assert.equal(find(rows[3], "member-buy-in").textContent, "累计带入 —");
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: 2,
+    roomMembers: [{ ...first.roomMembers[0], totalBuyIn: 1400, netChips: -80 }] } });
+  assert.equal(find(elements["members-list"].children[0], "member-profit").textContent, "亏损 -80");
+  assert.equal(find(elements["members-list"].children[0], "member-buy-in").textContent, "累计带入 1,400");
+});
+
+test("随机落座使用服务端真实座号，不同座号均旋转到正下方且不变成一号位", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  let revision = 1;
+  for (const assigned of [4, 2, 0, 5]) {
+    const first = lobbySnapshot({ revision: revision++ });
+    sockets[0].receive({ type: "SNAPSHOT", payload: first });
+    elements["table-seats"].children.find((seat) => seat.attributes["data-seat-index"] === "3").listeners.click();
+    assert.deepEqual(sockets[0].sent.at(-1).payload, {});
+    sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: revision++, self: { ...first.self, seatIndex: assigned },
+      roomMembers: [...first.roomMembers, { userId: "host", nickname: "本人", seatIndex: assigned, state: "SEATED" }] } });
+    const mine = elements["table-seats"].children.find((seat) => seat.className.includes(" self"));
+    assert.equal(mine.attributes["data-seat-index"], String(assigned));
+    assert.equal(mine.style.values["--x"], "50%");
+    assert.equal(mine.style.values["--y"], "89%");
+    assert.equal(descendants(mine).find((node) => node.className === "seat-number").textContent, (assigned + 1) + "号");
+    assert.match(elements["table-notice"].textContent, new RegExp("已入座 " + (assigned + 1) + " 号位"));
+  }
+});

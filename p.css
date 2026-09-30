@@ -843,12 +843,22 @@ select {
 }
 .member {
   display:flex;
-  justify-content:space-between;
+  align-items:center;
   padding:10px 0;
   border-bottom:1px solid #ffffff09;
   font-size:12px;
-  gap:12px;
+  gap:8px;
 }
+.member-avatar { position:relative; display:grid; place-items:center; width:30px; height:30px; flex-shrink:0; border-radius:50%; overflow:hidden; background:#303648; color:#e6d0a1; }
+.member-avatar img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+.member-profile { flex:1; min-width:0; }
+.member-profile strong { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.member-profile small, .member-balance small { display:block; margin-top:3px; }
+.member-balance { flex-shrink:0; text-align:right; font-variant-numeric:tabular-nums; }
+.member-profit { color:inherit; }
+.member-profit.profit-positive { color:#ff666e; }
+.member-profit.profit-negative { color:#58cc99; }
+.seat-number { position:absolute; top:0; left:calc(50% - var(--seat-size,60px) / 2); z-index:3; padding:1px 3px; border-radius:4px; background:#141925; border:1px solid #737b8c; color:#e2e5ec; font-size:8px; line-height:1.25; white-space:nowrap; }
 .member small {
   font-size:10px;
   color:var(--muted);
@@ -1214,6 +1224,7 @@ body.room-mode { height:100dvh; min-height:0; }
   .room-details .menu-control { padding:5px 6px; font-size:11px; }
   .room-details .menu-control small { font-size:8px; }
   .room-details .menu-more { grid-column:span 2; margin-top:0; padding-top:5px; }
+  .room-details .menu-more[open] { grid-column:1 / -1; }
   .room-details .menu-more summary { font-size:10px; }
   .room-details .buy-in-form label { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
   .room-details .buy-in-form select { padding:5px 8px; font-size:12px; }
