@@ -98,23 +98,9 @@ button:active:not(:disabled) {
   align-items:center;
   flex:1;
 }
-.brand-mark {
-  color:var(--gold);
-  font:32px Georgia,serif;
-}
 .brand strong {
   font-size:18px;
   letter-spacing:.09em;
-}
-.brand small {
-  display:block;
-  color:var(--muted);
-  font-size:10px;
-  margin-top:3px;
-  max-width:200px;
-  overflow:hidden;
-  text-overflow:ellipsis;
-  white-space:nowrap;
 }
 .connection-status {
   font-size:10px;
@@ -811,26 +797,6 @@ select {
   justify-content:space-between;
   gap:10px;
 }
-.lobby-controls {
-  display:flex;
-  align-items:end;
-  justify-content:center;
-  flex-wrap:wrap;
-  gap:8px;
-  margin:12px 0;
-}
-.lobby-controls button {
-  padding:10px 13px;
-  font-size:12px;
-}
-.lobby-controls label {
-  font-size:10px;
-  gap:4px;
-}
-.lobby-controls select {
-  padding:8px;
-  font-size:12px;
-}
 .room-details,.help-panel {
   position:fixed;
   top:max(16px,env(safe-area-inset-top));
@@ -1110,3 +1076,27 @@ select {
 .seat.folded .hole-cards {
   opacity:.35;
 }
+
+/* Empty seats are the entry point for sitting, including keyboard activation. */
+button.seat.empty {
+  appearance:none;
+  padding:0;
+  border:0;
+  border-radius:0;
+  background:none;
+  color:inherit;
+  font-weight:inherit;
+}
+button.seat.empty:disabled { opacity:.35; cursor:default; }
+button.seat.empty:not(:disabled) { opacity:.72; cursor:pointer; }
+button.seat.empty:hover:not(:disabled) { background:none; }
+button.seat.empty:hover:not(:disabled) .seat-avatar { border-color:var(--gold); color:var(--gold); background:#e7c68b0b; }
+button.seat.empty:active:not(:disabled) { transform:translate(-50%,-50%); }
+button.seat.empty:focus-visible { border-radius:12px; }
+.menu-controls { clear:both; width:100%; display:grid; gap:9px; padding:8px 0 17px; border-bottom:1px solid #ffffff10; }
+.menu-controls h3 { margin:10px 0 0; color:#d7c19c; }
+.menu-controls p { line-height:1.8; margin:0 0 3px; }
+.menu-control { display:flex; justify-content:space-between; align-items:center; gap:10px; text-align:left; }
+.menu-control small { font-size:10px; font-weight:400; color:#9ca5b7; }
+.play-state-notice { text-align:center; background:#e7c68b0c; border:1px solid #e7c68b22; color:#deca9e; border-radius:8px; font-size:11px; line-height:1.6; padding:7px 10px; }
+.table-wordmark { font-size:25px; }

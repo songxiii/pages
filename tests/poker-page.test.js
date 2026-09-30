@@ -30,6 +30,8 @@ function mount(responses, initialToken = "", options = {}) {
   const calls = [];
   const sockets = [];
   const copied = [];
+  const confirmations = [];
+  const confirmResults = [...(options.confirmResults || [])];
   const intervals = new Map();
   let timerId = 0;
   class FakeWebSocket {
@@ -48,7 +50,7 @@ function mount(responses, initialToken = "", options = {}) {
   runInNewContext(script, {
     POKER_API_BASE_URL: options.apiBase || "https://api.example.com",
     ticketFromLocation, ticketFragmentUrl, validateSettings, redactCredentials, normalizeWebSocketUrl,
-    window: { location: { href: "https://example.com/p.html#ticket=v1.k1.test", protocol: "https:", search: "", hash: "#ticket=v1.k1.test" } },
+    window: { confirm(value) { confirmations.push(value); return confirmResults.shift() ?? false; }, location: { href: "https://example.com/p.html#ticket=v1.k1.test", protocol: "https:", search: "", hash: "#ticket=v1.k1.test" } },
     WebSocket: FakeWebSocket, crypto: webcrypto,
     navigator: { clipboard: { async writeText(value) { copied.push(value); } } },
     document: { body: element(), addEventListener() {}, getElementById(id) { return elements[id]; }, createElement: element },
@@ -72,7 +74,7 @@ function mount(responses, initialToken = "", options = {}) {
     setInterval(fn) { const id = ++timerId; intervals.set(id, fn); return id; },
     clearInterval(id) { intervals.delete(id); },
   });
-  return { elements, calls, storage, sockets, copied, intervals };
+  return { elements, calls, storage, sockets, copied, intervals, confirmations };
 }
 
 const version = "20260930112134";
@@ -348,9 +350,10 @@ test("旁观者不可行动；服务端授权后才显示入座准备选项；�
   await new Promise(setImmediate); authenticate(sockets[0]);
   sockets[0].receive({ type: "SNAPSHOT", payload: gameSnapshot({ self: { ...self, seatIndex: null, allowedCommands: ["SIT_DOWN"] } }) });
   assert.equal(elements["fold-action"].disabled, true);
-  assert.equal(elements["sit-down"].hidden, false);
+  const empty = elements["table-seats"].children.find((seat) => seat.className.includes(" empty"));
+  assert.equal(empty.disabled, false);
   assert.equal(elements["ready-player"].hidden, true);
-  elements["sit-down"].listeners.click();
+  empty.listeners.click();
   assert.equal(sockets[0].sent.at(-1).type, "SIT_DOWN");
   sockets[0].receive({ type: "ROOM_CLOSED" });
   assert.equal(elements["closed-panel"].hidden, false);
@@ -378,4 +381,116 @@ test("本人换座后仍在正下方，D/SB/BB 随最新牌局正确换位，双
   assert.deepEqual(badges(seats[1]), ["D", "SB"]);
   assert.equal(descendants(seats[0]).find((node) => node.className === "seat-position").textContent, "BB");
   assert.equal(descendants(seats[1]).find((node) => node.className === "seat-position").textContent, "SB");
+});
+
+function lobbySnapshot(overrides = {}) {
+  return { revision: 1,
+    self: { userId: "host", nickname: "房主", role: "CREATOR", seatIndex: null, roomState: "WATCHING", allowedCommands: ["SIT_DOWN", "START_HAND"] },
+    room: { roomId: "A123", status: "WAITING", playState: "WAITING", settings: { maxSeats: 6, seatingType: 0 } },
+    roomMembers: [{ userId: "u1", nickname: "已落座成员", seatIndex: 1, state: "SEATED", stack: 200 }],
+    counts: { seatedCount: 1 }, game: null, ...overrides };
+}
+
+test("点击虚线座位发送真实座位号，重复点击被锁定，确认落座后显示头像昵称并居中", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const first = lobbySnapshot(); sockets[0].receive({ type: "SNAPSHOT", payload: first });
+  const empty = elements["table-seats"].children.find((seat) => seat.attributes["data-seat-index"] === "4");
+  empty.listeners.click(); empty.listeners.click();
+  assert.equal(sockets[0].sent.filter((frame) => frame.type === "SIT_DOWN").length, 1);
+  assert.equal(sockets[0].sent.at(-1).payload.seatIndex, 4);
+  assert.equal(sockets[0].sent.at(-1).payload.expectedRevision, 1);
+  assert.equal(empty.disabled, true);
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: 2,
+    self: { ...first.self, seatIndex: 4, roomState: "SEATED", avatarUrl: "https://example.com/avatar.jpg", allowedCommands: ["STAND_UP", "START_HAND"] },
+    roomMembers: [...first.roomMembers, { userId: "host", nickname: "房主昵称", seatIndex: 4, state: "SEATED", stack: 200 }] } });
+  const mine = elements["table-seats"].children.find((seat) => seat.className.includes(" self"));
+  assert.equal(mine.attributes["data-seat-index"], "4");
+  assert.equal(mine.style.values["--x"], "50%");
+  assert.equal(descendants(mine).find((node) => node.className === "seat-name").textContent, "房主昵称");
+  assert.ok(descendants(mine).some((node) => node.src === "https://example.com/avatar.jpg"));
+  assert.equal(elements["stand-up"].hidden, false);
+  assert.equal(elements["start-hand"].disabled, false);
+});
+
+test("仅房主可控制游戏，按实际成员列表限制两人开局，服务端错误授权普通成员也不会显示管理项", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const first = lobbySnapshot({ counts: { seatedCount: 9 } });
+  sockets[0].receive({ type: "SNAPSHOT", payload: first });
+  assert.equal(elements["host-controls"].hidden, false);
+  assert.equal(elements["start-hand"].disabled, true);
+  elements["start-hand"].listeners.click();
+  assert.equal(sockets[0].sent.filter((frame) => frame.type === "START_HAND").length, 0);
+  const members = [...first.roomMembers, { userId: "u2", seatIndex: 3, state: "SEATED" }];
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: 2, roomMembers: members } });
+  assert.equal(elements["start-hand"].disabled, false);
+  elements["start-hand"].listeners.click();
+  assert.equal(sockets[0].sent.at(-1).type, "START_HAND");
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: 3, roomMembers: members,
+    self: { ...first.self, role: "MEMBER", allowedCommands: ["START_HAND", "PAUSE_GAME", "RESUME_GAME"] } } });
+  assert.equal(elements["host-controls"].hidden, true);
+  assert.equal(elements["start-hand"].hidden, true);
+  assert.equal(elements["pause-game"].hidden, true);
+  elements["start-hand"].listeners.click();
+  assert.equal(sockets[0].sent.filter((frame) => frame.type === "START_HAND").length, 1);
+});
+
+test("暂停请求明确等待本局结束，申请后仍允许本手行动，结算后暂停并可继续游戏", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const first = gameSnapshot({
+    room: { playState: "RUNNING", settings: { maxSeats: 2 } },
+    self: { ...self, seatIndex: 0, roomState: "IN_HAND", allowedCommands: ["PAUSE_GAME", "START_HAND"] },
+    roomMembers: [{ seatIndex: 0, state: "IN_HAND" }, { seatIndex: 1, state: "IN_HAND" }],
+  });
+  sockets[0].receive({ type: "SNAPSHOT", payload: first });
+  assert.equal(elements["start-hand"].disabled, true);
+  assert.equal(elements["pause-game"].disabled, false);
+  elements["pause-game"].listeners.click();
+  assert.equal(sockets[0].sent.at(-1).type, "PAUSE_GAME");
+  assert.equal(sockets[0].sent.at(-1).payload.afterCurrentHand, true);
+  assert.equal(elements["table-phase"].textContent, "第 1 手 · 翻牌前");
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: 2, room: { ...first.room, playState: "PAUSE_PENDING" } } });
+  assert.equal(elements["pause-game"].disabled, true);
+  assert.equal(elements["call-action"].disabled, false);
+  assert.equal(elements["play-state-notice"].hidden, false);
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: 3,
+    self: { ...first.self, allowedCommands: ["RESUME_GAME"] },
+    room: { ...first.room, playState: "PAUSED" }, game: { ...first.game, phase: "complete", legal: null } } });
+  assert.equal(elements["call-action"].disabled, true);
+  assert.equal(elements["resume-game"].hidden, false);
+  assert.equal(elements["resume-game"].disabled, false);
+  elements["resume-game"].listeners.click();
+  assert.equal(sockets[0].sent.at(-1).type, "RESUME_GAME");
+});
+
+test("所有已落座成员可起身，取消 confirm 不发送操作，确认后才发送；旁观者不显示起身", async () => {
+  const { elements, sockets, confirmations } = mount([roomResponse()], "", { confirmResults: [false, true] });
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const first = lobbySnapshot({ self: { userId: "u1", role: "MEMBER", seatIndex: 1, roomState: "SEATED", allowedCommands: ["STAND_UP"] } });
+  sockets[0].receive({ type: "SNAPSHOT", payload: first });
+  assert.equal(elements["host-controls"].hidden, true);
+  assert.equal(elements["stand-up"].hidden, false);
+  elements["stand-up"].listeners.click();
+  assert.equal(sockets[0].sent.filter((frame) => frame.type === "STAND_UP").length, 0);
+  assert.equal(elements["stand-up"].disabled, false);
+  elements["stand-up"].listeners.click();
+  assert.equal(confirmations.length, 2);
+  assert.equal(sockets[0].sent.at(-1).type, "STAND_UP");
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: 2, self: { ...first.self, seatIndex: null }, roomMembers: [] } });
+  assert.equal(elements["stand-up"].hidden, true);
+  elements["stand-up"].listeners.click();
+  assert.equal(confirmations.length, 2);
+  assert.equal(sockets[0].sent.filter((frame) => frame.type === "STAND_UP").length, 1);
+});
+
+test("品牌固定为算法培训班，不随活动名变化，页头不包含黑桃和副标题", async () => {
+  const { elements } = mount([roomResponse()]);
+  await new Promise(setImmediate);
+  assert.equal(elements["page-title"].textContent, "算法培训班");
+  const html = readFileSync(new URL("../p.html", import.meta.url), "utf8");
+  const header = html.match(/<header[\s\S]*?<\/header>/)[0];
+  assert.doesNotMatch(header, /♠|活动专属牌局|page-subtitle/);
+  assert.doesNotMatch(html, /桌边/);
 });

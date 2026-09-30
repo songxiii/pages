@@ -24,7 +24,8 @@ let reconnectTimer = null;
 let reconnectAttempts = 0;
 const table = createPokerTable({ document,
   onAction: (action, amount) => sendCommand("ACTION", { action, ...(amount == null ? {} : { amount }), handId: view?.game?.handId ?? view?.game?.handNumber, expectedRevision: view?.revision }),
-  onCommand: sendCommand,
+  onCommand: (type, payload) => { sendCommand(type, payload); toggleDrawer("room-details", "room-menu", false); },
+  confirmStand: () => window.confirm("确认起身并离开当前座位？起身后将以旁观身份观看牌局。"),
 });
 const debug = new URLSearchParams(window.location.search).get("debug") === "1";
 $("debug-panel").hidden = !debug;
@@ -205,7 +206,7 @@ async function createRoom(event) {
 function applyView(data) {
   view = data;
   $("activity-panel").hidden = !data.canCreate;
-  text("page-title", data.activity?.title || "桌边");
+  text("page-title", "算法培训班");
   const activity = data.activity || {};
   const self = data.self || {};
   const counts = data.counts || {};
@@ -260,7 +261,7 @@ function renderRoom() {
   const own = members.find((member) => String(member.id || member.userId) === String(self.id || self.userId));
   text("room-title", room.name || "活动房间");
   text("room-id", room.roomId ? "房间编号 " + room.roomId : "");
-  text("room-status", room.status === "WAITING" ? "等待开局" : room.status === "PLAYING" ? "牌局进行中" : room.status || "房间");
+  text("room-status", room.playState === "PAUSE_PENDING" ? "本局结束后暂停" : room.playState === "PAUSED" ? "已暂停" : room.status === "WAITING" ? "等待开局" : room.status === "PLAYING" ? "牌局进行中" : room.status || "房间");
   text("room-member-count", number(counts.roomMemberCount));
   text("online-count", number(counts.onlineCount));
   text("seated-count", number(counts.seatedCount));

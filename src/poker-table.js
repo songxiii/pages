@@ -55,15 +55,35 @@ export function raisePresets(game) {
   return [1.25, .75, .5, .33].map((ratio) => ({ ratio, amount: Math.min(legal.maxRaiseTo,
     Math.max(legal.minRaiseTo, Math.ceil((bet + call + (pot + call) * ratio) / step) * step)) }));
 }
+export function roomControls(view) {
+  const own = ownSeat(view);
+  const members = Array.isArray(view.roomMembers) ? view.roomMembers : view.game?.players || [];
+  const seated = [...new Set(members.filter((member) => !["WATCHING", "STANDING"].includes(member.state))
+    .map((member) => seatIndex(member)).filter((seat) => seat !== null && Number.isInteger(Number(seat)) && Number(seat) >= 0).map(Number))];
+  const host = ["CREATOR", "HOST"].includes(view.self?.role) || view.self?.isHost === true;
+  const inHand = Boolean(view.game && view.game.phase !== "complete");
+  const playState = view.room?.playState || (view.room?.status === "PAUSED" ? "PAUSED" : inHand || view.room?.status === "PLAYING" ? "RUNNING" : "WAITING");
+  const paused = playState === "PAUSED", pausePending = playState === "PAUSE_PENDING";
+  const allowed = view.self?.allowedCommands || [];
+  return { host, seatedCount: seated.length, seated: own !== null, inHand, paused, pausePending,
+    canSit: own === null && allowed.includes("SIT_DOWN"),
+    canStand: own !== null && allowed.includes("STAND_UP"),
+    canReady: own !== null && allowed.includes("READY"),
+    canStart: host && seated.length >= 2 && !inHand && !paused && !pausePending && allowed.includes("START_HAND"),
+    canPause: host && !paused && !pausePending && (inHand || playState === "RUNNING") && allowed.includes("PAUSE_GAME"),
+    canResume: host && paused && !inHand && seated.length >= 2 && allowed.includes("RESUME_GAME"),
+  };
+}
 function safeAvatar(url) {
   try { const parsed = new URL(url); return ["https:", "http:"].includes(parsed.protocol) ? parsed.href : null; }
   catch { return null; }
 }
-export function createPokerTable({ document, onAction, onCommand }) {
+export function createPokerTable({ document, onAction, onCommand, confirmStand = () => false }) {
   const $ = (id) => document.getElementById(id);
   let view = {}, game = null, connected = false, pending = false, pendingTimer = null;
   let lastHand = null, lastBoard = [], timer = null, deadline = null, currentTimer = null, currentSeconds = null;
   let lastLayoutKey = null, dealCleanupTimer = null;
+  let seatButtons = [], openSeats = new Set();
   const node = (tag, className, value) => {
     const el = document.createElement(tag); el.className = className;
     if (value != null) el.textContent = String(value);
@@ -94,7 +114,7 @@ export function createPokerTable({ document, onAction, onCommand }) {
   }
   function canAct() {
     const seat = ownSeat(view);
-    return connected && !pending && game?.legal && seat !== null && seat === game.turn && game.phase !== "complete";
+    return connected && !pending && !roomControls(view).paused && game?.legal && seat !== null && seat === game.turn && game.phase !== "complete";
   }
   function updateActions() {
     const enabled = Boolean(canAct()), legal = game?.legal || {};
@@ -111,16 +131,43 @@ export function createPokerTable({ document, onAction, onCommand }) {
       button.append(label, node("small", "", Math.round(ratio * 100) + "%"));
       button.addEventListener("click", () => act("raise", amount)); presets.append(button);
     }
-    const controls = view.self?.allowedCommands || [];
-    const availability = { "sit-down": "SIT_DOWN", "ready-player": "READY", "stand-up": "STAND_UP", "start-hand": "START_HAND" };
-    let visible = false;
-    for (const [id, command] of Object.entries(availability)) {
-      $(id).hidden = !controls.includes(command); $(id).disabled = !connected || pending;
-      visible ||= !$(id).hidden;
+    const controls = roomControls(view), enabledControl = connected && !pending;
+    for (const button of seatButtons) {
+      button.disabled = !enabledControl || !controls.canSit;
+      button.setAttribute("title", controls.seated ? "请先从菜单起身再选择其他座位" : "点击落座");
     }
-    $("lobby-controls").hidden = !visible;
-    $("seat-picker-label").hidden = !controls.includes("SIT_DOWN") || view.room?.settings?.seatingType !== 1;
+    $("host-controls").hidden = !controls.host;
+    $("player-controls").hidden = !controls.seated;
+    $("stand-up").hidden = !controls.seated;
+    $("stand-up").disabled = !enabledControl || !controls.canStand;
+    $("ready-player").hidden = !controls.canReady;
+    $("ready-player").disabled = !enabledControl || !controls.canReady;
+    $("start-hand").hidden = !controls.host || controls.paused;
+    $("start-hand").disabled = !enabledControl || !controls.canStart;
+    $("pause-game").hidden = !controls.host || controls.paused;
+    $("pause-game").disabled = !enabledControl || !controls.canPause;
+    $("pause-game").textContent = controls.pausePending ? "已申请本局结束后暂停" : "暂停游戏（本局结束后生效）";
+    $("resume-game").hidden = !controls.host || !controls.paused;
+    $("resume-game").disabled = !enabledControl || !controls.canResume;
+    $("host-control-detail").textContent = controls.pausePending ? "当前这手继续进行，结算完成后暂停，不再发下一手。"
+      : controls.paused ? (controls.seatedCount < 2 ? "游戏已暂停，至少 2 人落座后可继续。" : "游戏已暂停，继续后恢复发牌。")
+      : controls.seatedCount < 2 ? "至少需要 2 人落座，目前 " + controls.seatedCount + " 人。"
+      : controls.inHand ? "牌局进行中，暂停会在本局结束后生效。" : controls.canStart ? "已有 " + controls.seatedCount + " 人落座，可以开始游戏。" : "已有 " + controls.seatedCount + " 人落座，等待房间开放开始操作。";
+    $("play-state-notice").hidden = !controls.paused && !controls.pausePending;
+    $("play-state-notice").textContent = controls.paused ? "游戏已暂停 · 等待房主继续" : "房主已申请暂停 · 本局结束后生效";
   }
+  function command(type, payload = {}) {
+    if (!connected || pending) return;
+    const controls = roomControls(view);
+    const permission = { SIT_DOWN: controls.canSit && openSeats.has(payload.seatIndex), READY: controls.canReady,
+      STAND_UP: controls.canStand, START_HAND: controls.canStart, PAUSE_GAME: controls.canPause, RESUME_GAME: controls.canResume };
+    if (!permission[type]) return;
+    pending = true; updateActions();
+    $("table-notice").textContent = type === "SIT_DOWN" ? "正在落座…" : type === "PAUSE_GAME" ? "正在申请本局结束后暂停…" : "正在提交操作…";
+    pendingTimer = setTimeout(() => { pending = false; connected = false; updateActions(); $("table-notice").textContent = "操作尚未确认，请重新连接以同步房间。"; }, 10000);
+    onCommand(type, { ...payload, expectedRevision: view.revision });
+  }
+
   function updateClock() {
     if (!currentTimer || !deadline) return;
     const seconds = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
@@ -147,7 +194,7 @@ export function createPokerTable({ document, onAction, onCommand }) {
     }
     $("table-stage").setAttribute("data-seat-count", String(layout.length));
     const seats = $("table-seats"); seats.replaceChildren();
-    const seatPicker = $("seat-picker"); seatPicker.replaceChildren();
+    seatButtons = []; openSeats = new Set();
     currentTimer = null; currentSeconds = null;
     for (const place of layout) {
       const player = players.find((p) => p.seatIndex === place.seatIndex);
@@ -155,14 +202,19 @@ export function createPokerTable({ document, onAction, onCommand }) {
       const person = player || member;
       const mine = selfSeat === place.seatIndex;
       const current = game?.turn === place.seatIndex && game?.phase !== "complete";
-      const el = node("div", "seat" + (!person ? " empty" : "") + (mine ? " self" : "")
+      const el = node(person ? "div" : "button", "seat" + (!person ? " empty" : "") + (mine ? " self" : "")
         + (current ? " current" : "") + (person?.folded ? " folded" : "") + (person?.online === false ? " offline" : "")
         + (place.x > 50 ? " right" : "") + (place.y < 25 ? " top" : "") + (place.y > 85 ? " bottom" : ""));
       el.setAttribute("data-seat-index", String(place.seatIndex));
+      if (!person) {
+        el.type = "button"; el.setAttribute("aria-label", "座位 " + (place.seatIndex + 1) + "，点击落座");
+        el.addEventListener("click", () => command("SIT_DOWN", { seatIndex: place.seatIndex }));
+        seatButtons.push(el); openSeats.add(place.seatIndex);
+      }
       el.style.setProperty("--x", place.x + "%"); el.style.setProperty("--y", place.y + "%"); el.style.setProperty("--hue", String((place.seatIndex * 59 + 220) % 360));
-      const name = person?.nickname || person?.name || member?.nickname || "玩家";
+      const name = person?.nickname || person?.name || member?.nickname || (mine ? view.self?.nickname : null) || "玩家";
       const avatar = node("div", "seat-avatar"); avatar.append(node("span", "avatar-monogram", person ? [...name][0] : "+"));
-      const avatarUrl = safeAvatar(person?.avatarUrl || member?.avatarUrl);
+      const avatarUrl = safeAvatar(person?.avatarUrl || member?.avatarUrl || (mine ? view.self?.avatarUrl : null));
       if (avatarUrl) { const img = node("img", ""); img.src = avatarUrl; img.alt = ""; img.referrerPolicy = "no-referrer"; img.addEventListener("error", () => img.remove()); avatar.append(img); }
       const label = node("div", "seat-label");
       const rolePosition = place.seatIndex === roles.smallBlindSeat ? "SB" : place.seatIndex === roles.bigBlindSeat ? "BB" : place.seatIndex === roles.dealer ? "BTN" : null;
@@ -190,7 +242,6 @@ export function createPokerTable({ document, onAction, onCommand }) {
       if (Number(person?.bet) > 0) { const bet = node("div", "seat-bet"); bet.append(node("span", "chip"), node("span", "", formatChips(person.bet))); el.append(bet); }
       if (current) { const bar = node("div", "turn-timer"), progress = node("span", ""); bar.append(progress); el.append(bar); currentTimer = progress; currentSeconds = node("span", "turn-seconds"); el.append(currentSeconds); }
       seats.append(el);
-      if (!person) { const option = node("option", "", "座位 " + (place.seatIndex + 1)); option.value = String(place.seatIndex); seatPicker.append(option); }
     }
     const board = $("board-cards"); board.replaceChildren();
     const cards = (game?.board || []).slice(0, 5);
@@ -202,7 +253,9 @@ export function createPokerTable({ document, onAction, onCommand }) {
     $("table-pot").textContent = formatChips(game?.pot ?? 0);
     $("table-phase").textContent = game ? "第 " + (game.handNumber ?? "—") + " 手 · " + (PHASE_NAMES[game.phase] || "牌局进行中") : "等待开局";
     $("table-result").textContent = game?.result?.message || "";
-    $("table-notice").textContent = !connected ? "正在同步牌局…" : !game ? "房间已连接，等待玩家入座和准备" : selfSeat === null ? "你正在旁观本场牌局" : canAct() ? "轮到你行动" : game.phase === "complete" ? "本局结束，等待下一手" : "等待其他玩家行动";
+    $("table-notice").textContent = !connected ? "正在同步牌局…" : roomControls(view).paused ? "游戏已暂停，等待房主继续"
+      : !game ? (selfSeat === null ? "点击虚线空座落座，由房主开始游戏" : "已入座，等待房主开始游戏")
+      : selfSeat === null ? "你正在旁观本场牌局" : canAct() ? "轮到你行动" : game.phase === "complete" ? "本局结束，等待下一手" : "等待其他玩家行动";
     deadline = Date.parse(game?.turnDeadline || "");
     if (currentSeconds) currentSeconds.hidden = !Number.isFinite(deadline);
     clearInterval(timer); updateClock();
@@ -236,15 +289,14 @@ export function createPokerTable({ document, onAction, onCommand }) {
   $("raise-range").addEventListener("input", () => { $("raise-value").textContent = formatChips($("raise-range").value); });
   $("raise-editor").addEventListener("submit", (event) => { event.preventDefault(); act("raise", Number($("raise-range").value)); });
   $("all-in-action").addEventListener("click", () => act("raise", game?.legal?.maxRaiseTo));
-  for (const [id, command] of [["sit-down", "SIT_DOWN"], ["ready-player", "READY"], ["stand-up", "STAND_UP"], ["start-hand", "START_HAND"]]) {
-    $(id).addEventListener("click", () => {
-      if (!connected || pending || !view.self?.allowedCommands?.includes(command)) return;
-      const payload = command === "SIT_DOWN" && view.room?.settings?.seatingType === 1 ? { seatIndex: Number($("seat-picker").value) } : {};
-      if (command === "SIT_DOWN" && view.room?.settings?.seatingType === 1 && !$("seat-picker").children.length) return;
-      pending = true; updateActions(); onCommand(command, payload);
-      pendingTimer = setTimeout(() => { pending = false; connected = false; updateActions(); $("table-notice").textContent = "操作尚未确认，请重新连接以同步房间。"; }, 10000);
-    });
+  $("stand-up").addEventListener("click", () => {
+    if (!connected || pending || !roomControls(view).canStand) return;
+    if (confirmStand()) command("STAND_UP");
+  });
+  for (const [id, type] of [["ready-player", "READY"], ["start-hand", "START_HAND"], ["pause-game", "PAUSE_GAME"], ["resume-game", "RESUME_GAME"]]) {
+    $(id).addEventListener("click", () => command(type, type === "PAUSE_GAME" ? { afterCurrentHand: true } : {}));
   }
+
   return {
     render,
     setConnected(value, notice) { connected = value; updateActions(); if (notice) $("table-notice").textContent = notice; },
