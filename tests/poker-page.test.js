@@ -394,12 +394,12 @@ function lobbySnapshot(overrides = {}) {
 test("点击虚线座位发送真实座位号，重复点击被锁定，确认落座后显示头像昵称并居中", async () => {
   const { elements, sockets } = mount([roomResponse()]);
   await new Promise(setImmediate); authenticate(sockets[0]);
-  const first = lobbySnapshot(); sockets[0].receive({ type: "SNAPSHOT", payload: first });
+  const first = lobbySnapshot({ room: { ...lobbySnapshot().room, settings: { ...lobbySnapshot().room.settings, seatingType: 1 } } }); sockets[0].receive({ type: "SNAPSHOT", payload: first });
   const empty = elements["table-seats"].children.find((seat) => seat.attributes["data-seat-index"] === "4");
   empty.listeners.click(); empty.listeners.click();
   assert.equal(sockets[0].sent.filter((frame) => frame.type === "SIT_DOWN").length, 1);
   assert.equal(sockets[0].sent.at(-1).payload.seatIndex, 4);
-  assert.equal(sockets[0].sent.at(-1).payload.expectedRevision, 1);
+  assert.deepEqual(sockets[0].sent.at(-1).payload, { seatIndex: 4 });
   assert.equal(empty.disabled, true);
   sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: 2,
     self: { ...first.self, seatIndex: 4, roomState: "SEATED", avatarUrl: "https://example.com/avatar.jpg", allowedCommands: ["STAND_UP", "START_HAND"] },
@@ -485,12 +485,56 @@ test("所有已落座成员可起身，取消 confirm 不发送操作，确认�
   assert.equal(sockets[0].sent.filter((frame) => frame.type === "STAND_UP").length, 1);
 });
 
-test("品牌固定为算法培训班，不随活动名变化，页头不包含黑桃和副标题", async () => {
-  const { elements } = mount([roomResponse()]);
+test("页面不显示品牌名称，菜单标题优先使用活动名称", async () => {
+  const { elements } = mount([roomResponse({}, { activity: { title: "周末活动" }, room: { name: "另一个房间名" } })]);
   await new Promise(setImmediate);
-  assert.equal(elements["page-title"].textContent, "算法培训班");
+  assert.equal(elements["room-title"].textContent, "周末活动");
   const html = readFileSync(new URL("../p.html", import.meta.url), "utf8");
   const header = html.match(/<header[\s\S]*?<\/header>/)[0];
-  assert.doesNotMatch(header, /♠|活动专属牌局|page-subtitle/);
-  assert.doesNotMatch(html, /桌边/);
+  assert.doesNotMatch(header, /♠|活动专属牌局|page-title|brand/);
+  assert.doesNotMatch(html, /算法培训班|桌边|table-wordmark/);
+});
+
+test("随机落座发送空 payload，准备、起身和开始不夹带 Java 不接受的 revision 字段", async () => {
+  const { elements, sockets } = mount([roomResponse()], "", { confirmResults: [true] });
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const first = lobbySnapshot(); sockets[0].receive({ type: "SNAPSHOT", payload: first });
+  elements["table-seats"].children.find((seat) => seat.className.includes(" empty")).listeners.click();
+  assert.equal(sockets[0].sent.at(-1).type, "SIT_DOWN");
+  assert.deepEqual(sockets[0].sent.at(-1).payload, {});
+  const seated = { ...first, revision: 2, self: { ...first.self, seatIndex: 2, allowedCommands: ["READY", "START_HAND", "STAND_UP"] },
+    roomMembers: [...first.roomMembers, { userId: "host", seatIndex: 2, state: "SEATED" }] };
+  for (const [id, type] of [["ready-player", "READY"], ["start-hand", "START_HAND"], ["stand-up", "STAND_UP"]]) {
+    sockets[0].receive({ type: "SNAPSHOT", payload: { ...seated, revision: seated.revision++ } });
+    elements[id].listeners.click();
+    assert.equal(sockets[0].sent.at(-1).type, type);
+    assert.deepEqual(sockets[0].sent.at(-1).payload, {});
+  }
+});
+
+test("旧快照缺少 allowedCommands 仍可申请落座，明确禁止落座则显示原因且不发送", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const first = lobbySnapshot(); delete first.self.allowedCommands;
+  sockets[0].receive({ type: "SNAPSHOT", payload: first });
+  elements["table-seats"].children.find((seat) => seat.className.includes(" empty")).listeners.click();
+  assert.equal(sockets[0].sent.at(-1).type, "SIT_DOWN");
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: 2, self: { ...first.self, allowedCommands: [] } } });
+  const button = elements["table-seats"].children.find((seat) => seat.className.includes(" empty"));
+  assert.equal(button.disabled, false);
+  button.listeners.click();
+  assert.match(elements["table-notice"].textContent, /暂不允许落座/);
+  assert.equal(sockets[0].sent.filter((frame) => frame.type === "SIT_DOWN").length, 1);
+});
+
+test("连接未就绪及当前牌局不允许落座时，点击空座始终显示原因", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate);
+  elements["table-seats"].children.find((seat) => seat.className.includes(" empty")).listeners.click();
+  assert.match(elements["table-notice"].textContent, /连接尚未就绪/);
+  authenticate(sockets[0]);
+  sockets[0].receive({ type: "SNAPSHOT", payload: gameSnapshot({ self: { ...self, seatIndex: null, allowedCommands: [] } }) });
+  elements["table-seats"].children.find((seat) => seat.className.includes(" empty")).listeners.click();
+  assert.match(elements["table-notice"].textContent, /等本局结束/);
+  assert.equal(sockets[0].sent.filter((frame) => frame.type === "SIT_DOWN").length, 0);
 });

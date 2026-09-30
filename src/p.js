@@ -1,4 +1,4 @@
-import { createPokerTable } from "./poker-table.js";
+import { createPokerTable } from "./poker-table.js?v=20260930-seat-fix";
 import { POKER_API_BASE_URL } from "./poker-config.js";
 import { ticketFromLocation, ticketFragmentUrl, validateSettings, redactCredentials, normalizeWebSocketUrl } from "./poker-entry.js";
 
@@ -206,7 +206,6 @@ async function createRoom(event) {
 function applyView(data) {
   view = data;
   $("activity-panel").hidden = !data.canCreate;
-  text("page-title", "算法培训班");
   const activity = data.activity || {};
   const self = data.self || {};
   const counts = data.counts || {};
@@ -259,7 +258,7 @@ function renderRoom() {
   const counts = view.counts || {};
   const members = Array.isArray(view.roomMembers) ? view.roomMembers : [];
   const own = members.find((member) => String(member.id || member.userId) === String(self.id || self.userId));
-  text("room-title", room.name || "活动房间");
+  text("room-title", view.activity?.title || room.name || "活动房间");
   text("room-id", room.roomId ? "房间编号 " + room.roomId : "");
   text("room-status", room.playState === "PAUSE_PENDING" ? "本局结束后暂停" : room.playState === "PAUSED" ? "已暂停" : room.status === "WAITING" ? "等待开局" : room.status === "PLAYING" ? "牌局进行中" : room.status || "房间");
   text("room-member-count", number(counts.roomMemberCount));

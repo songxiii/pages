@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ownSeat, tableLayout, raisePresets, handPositions } from "../src/poker-table.js";
+import { ownSeat, tableLayout, raisePresets, handPositions, seatIndex } from "../src/poker-table.js";
 
 test("2–9 人所有本人座位都在正下方，保留真实座位编号与顺序，布局左右平衡", () => {
   for (let count = 2; count <= 9; count++) {
@@ -47,4 +47,12 @@ test("优先服务端盲注座位，兼容位置标签，明确 null 时不自�
   assert.deepEqual(handPositions({ dealer: 0, smallBlindSeat: 2, bigBlindSeat: 1, players }), { dealer: 0, smallBlindSeat: 2, bigBlindSeat: 1 });
   assert.deepEqual(handPositions({ dealer: 0, smallBlindSeat: null, bigBlindSeat: 1, players }), { dealer: 0, smallBlindSeat: null, bigBlindSeat: 1 });
   assert.deepEqual(handPositions(null), { dealer: null, smallBlindSeat: null, bigBlindSeat: null });
+});
+
+test("兼容 Java 旧视图的 1 基 seatNo，显式 seatIndex=null 优先代表旁观", () => {
+  assert.equal(seatIndex({ seatNo: 1 }), 0);
+  assert.equal(seatIndex({ seatNo: 9 }), 8);
+  assert.equal(seatIndex({ seatNo: null }), null);
+  assert.equal(seatIndex({ seatIndex: null, seatNo: 4 }), null);
+  assert.equal(ownSeat({ self: { userId: "u1", seatNo: 4 } }), 3);
 });

@@ -43,7 +43,7 @@ test("活动页面提供身份、创建、等待、房间和连接视图", () =>
     assert.match(page, new RegExp(`id="${id}"`));
   }
   assert.match(page, /页面版本 <time[^>]+>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}<\/time>/);
-  assert.match(page, /type="module" src="\.\/src\/p\.js"/);
+  assert.match(page, /type="module" src="\.\/src\/p\.js(?:\?[^\"]+)?"/);
 });
 
 test("从 hash 或 query 读取 ticket，忽略其他参数", () => {

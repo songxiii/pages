@@ -14,9 +14,15 @@ const SEAT_LAYOUTS = {
 };
 export const formatChips = (value) => Number.isFinite(Number(value)) ? Number(value).toLocaleString("zh-CN", { maximumFractionDigits: 2 }) : "—";
 const identity = (member) => member?.userId ?? member?.id;
-export function seatIndex(player) { return player?.seatIndex ?? player?.seat ?? null; }
+export function seatIndex(player) {
+  if (!player) return null;
+  if (Object.hasOwn(player, "seatIndex")) return player.seatIndex ?? null;
+  if (Object.hasOwn(player, "seat")) return player.seat ?? null;
+  const storedSeat = Number(player.seatNo);
+  return player.seatNo != null && Number.isInteger(storedSeat) && storedSeat > 0 ? storedSeat - 1 : null;
+}
 export function ownSeat(view) {
-  if (view.self && (Object.hasOwn(view.self, "seatIndex") || Object.hasOwn(view.self, "seat")) && seatIndex(view.self) === null) return null;
+  if (view.self && (Object.hasOwn(view.self, "seatIndex") || Object.hasOwn(view.self, "seat") || Object.hasOwn(view.self, "seatNo")) && seatIndex(view.self) === null) return null;
   const explicit = seatIndex(view.self);
   if (explicit !== null) return Number(explicit);
   const id = identity(view.self);
@@ -64,9 +70,12 @@ export function roomControls(view) {
   const inHand = Boolean(view.game && view.game.phase !== "complete");
   const playState = view.room?.playState || (view.room?.status === "PAUSED" ? "PAUSED" : inHand || view.room?.status === "PLAYING" ? "RUNNING" : "WAITING");
   const paused = playState === "PAUSED", pausePending = playState === "PAUSE_PENDING";
-  const allowed = view.self?.allowedCommands || [];
+  const allowed = Array.isArray(view.self?.allowedCommands) ? view.self.allowedCommands : [];
+  // Older snapshots omit command capabilities. Java still validates the request.
+  const canSit = own === null && (Array.isArray(view.self?.allowedCommands) ? allowed.includes("SIT_DOWN")
+    : !inHand && view.room?.status !== "CLOSED" && !["ENDED", "CANCELLED"].includes(view.activity?.status));
   return { host, seatedCount: seated.length, seated: own !== null, inHand, paused, pausePending,
-    canSit: own === null && allowed.includes("SIT_DOWN"),
+    canSit,
     canStand: own !== null && allowed.includes("STAND_UP"),
     canReady: own !== null && allowed.includes("READY"),
     canStart: host && seated.length >= 2 && !inHand && !paused && !pausePending && allowed.includes("START_HAND"),
@@ -133,7 +142,9 @@ export function createPokerTable({ document, onAction, onCommand, confirmStand =
     }
     const controls = roomControls(view), enabledControl = connected && !pending;
     for (const button of seatButtons) {
-      button.disabled = !enabledControl || !controls.canSit;
+      // Keep unavailable seats clickable to explain why sitting is not possible.
+      button.disabled = pending;
+      button.setAttribute("aria-disabled", String(!enabledControl || !controls.canSit));
       button.setAttribute("title", controls.seated ? "请先从菜单起身再选择其他座位" : "点击落座");
     }
     $("host-controls").hidden = !controls.host;
@@ -157,15 +168,23 @@ export function createPokerTable({ document, onAction, onCommand, confirmStand =
     $("play-state-notice").textContent = controls.paused ? "游戏已暂停 · 等待房主继续" : "房主已申请暂停 · 本局结束后生效";
   }
   function command(type, payload = {}) {
-    if (!connected || pending) return;
+    if (pending) { $("table-notice").textContent = "正在处理上一项操作，请稍候…"; return; }
+    if (!connected) { $("table-notice").textContent = "牌桌连接尚未就绪，请稍候或在菜单中重新连接。"; return; }
     const controls = roomControls(view);
     const permission = { SIT_DOWN: controls.canSit && openSeats.has(payload.seatIndex), READY: controls.canReady,
       STAND_UP: controls.canStand, START_HAND: controls.canStart, PAUSE_GAME: controls.canPause, RESUME_GAME: controls.canResume };
-    if (!permission[type]) return;
+    if (!permission[type]) {
+      if (type === "SIT_DOWN") $("table-notice").textContent = controls.seated ? "你已落座，请先在菜单中确认起身。"
+        : !openSeats.has(payload.seatIndex) ? "该座位已有人入座，请选择其他空座。"
+        : controls.inHand ? "本局正在进行，请等本局结束后落座。" : "房间暂不允许落座，请稍后重新检查房间。";
+      return;
+    }
     pending = true; updateActions();
-    $("table-notice").textContent = type === "SIT_DOWN" ? "正在落座…" : type === "PAUSE_GAME" ? "正在申请本局结束后暂停…" : "正在提交操作…";
+    $("table-notice").textContent = type === "SIT_DOWN" ? (Number(view.room?.settings?.seatingType) === 0 ? "正在随机落座…" : "正在落座…") : type === "PAUSE_GAME" ? "正在申请本局结束后暂停…" : "正在提交操作…";
     pendingTimer = setTimeout(() => { pending = false; connected = false; updateActions(); $("table-notice").textContent = "操作尚未确认，请重新连接以同步房间。"; }, 10000);
-    onCommand(type, { ...payload, expectedRevision: view.revision });
+    // Current Java rejects extra lifecycle fields. Revision belongs to ACTION only.
+    const commandPayload = type === "SIT_DOWN" && Number(view.room?.settings?.seatingType) === 0 ? {} : payload;
+    onCommand(type, commandPayload);
   }
 
   function updateClock() {
@@ -180,7 +199,7 @@ export function createPokerTable({ document, onAction, onCommand, confirmStand =
     const settings = view.room?.settings || {};
     const selfSeat = ownSeat(view);
     // `id` in the old two-player protocol is a seat; activity protocol uses explicit seatIndex.
-    const players = (game?.players || []).map((p) => ({ ...p, seatIndex: Number(p.seatIndex ?? p.seat ?? p.id) }));
+    const players = (game?.players || []).map((p) => ({ ...p, seatIndex: Number(seatIndex(p) ?? p.id) }));
     if (game) game = { ...game, players, turn: game.turn == null ? null : Number(game.turn) };
     const members = view.roomMembers || [];
     const count = settings.maxSeats || Math.max(2, ...players.map((p) => p.seatIndex + 1));

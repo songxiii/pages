@@ -92,16 +92,6 @@ button:active:not(:disabled) {
   align-items:center;
   gap:12px;
 }
-.brand {
-  display:flex;
-  gap:9px;
-  align-items:center;
-  flex:1;
-}
-.brand strong {
-  font-size:18px;
-  letter-spacing:.09em;
-}
 .connection-status {
   font-size:10px;
   color:#939bab;
@@ -338,16 +328,6 @@ select {
   width:56%;
   text-align:center;
   z-index:1;
-}
-.table-wordmark {
-  display:block;
-  color:#ffffff0d;
-  font-size:29px;
-  letter-spacing:.08em;
-  font-weight:900;
-  font-style:italic;
-  white-space:nowrap;
-  margin-bottom:15px;
 }
 .table-blinds {
   font-size:11px;
@@ -1034,9 +1014,6 @@ select {
     width:41px;
     height:58px;
   }
-  .table-wordmark {
-    font-size:25px;
-  }
   .raise-presets button {
     padding:7px 6px;
     font-size:12px;
@@ -1048,9 +1025,6 @@ select {
   .connection-status {
     font-size:9px;
   }
-  .brand small {
-    max-width:130px;
-  }
 }
 @media(prefers-reduced-motion:reduce) {
   *,*:before,*:after {
@@ -1060,18 +1034,6 @@ select {
   .flying-card {
     display:none;
   }
-}
-.brand {
-  min-width:0;
-}
-.brand>div {
-  min-width:0;
-}
-.brand strong {
-  display:block;
-  overflow:hidden;
-  text-overflow:ellipsis;
-  white-space:nowrap;
 }
 .seat.folded .hole-cards {
   opacity:.35;
@@ -1099,4 +1061,6 @@ button.seat.empty:focus-visible { border-radius:12px; }
 .menu-control { display:flex; justify-content:space-between; align-items:center; gap:10px; text-align:left; }
 .menu-control small { font-size:10px; font-weight:400; color:#9ca5b7; }
 .play-state-notice { text-align:center; background:#e7c68b0c; border:1px solid #e7c68b22; color:#deca9e; border-radius:8px; font-size:11px; line-height:1.6; padding:7px 10px; }
-.table-wordmark { font-size:25px; }
+
+.page-head-spacer { flex:1; }
+button.seat.empty[aria-disabled="true"]:not(:disabled) { opacity:.4; }

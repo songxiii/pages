@@ -4,7 +4,7 @@
 
 仓库已有 `/entry`、`/rooms`、`AUTH`、`AUTH_OK`、`PING`、`SNAPSHOT` 的前端接入。2026-09-30 Java 已补齐下文的完整牌局快照及 `SIT_DOWN/READY/STAND_UP/START_HAND/ACTION`，代码与部署说明见相邻 Java 仓库 `docs/POKER_ACTIVITY_V1.md`。前端曾用模拟服务验证；真实活动 ticket、MySQL 迁移与公网 WSS 联调仍待部署验证。
 
-Java 的当前鉴权口径为 **ticket-only**：entry/rooms 不需要 Authorization，身份来自服务端校验的 ticket。数据库需新增 `poker_activity_state/poker_activity_command`，并在所有实例配置稳定的 `POKER_STATE_KEY`。外部 `seatIndex` 从 0 开始，数据库 `seat_no` 保持 1 起；Java 早期设计稿中的 `SET_READY/PLAYER_ACTION/commandId/actionId` 和增量事件不用于此页面。
+Java 的当前鉴权口径为 **ticket-only**：entry/rooms 不需要 Authorization，身份来自服务端校验的 ticket。数据库需新增 `poker_activity_state/poker_activity_command`；牌局加密默认从已有 `POKER_WS_SECRET` 派生，无需增加密钥配置，`POKER_STATE_KEY` 是可选优先覆盖。外部 `seatIndex` 从 0 开始，数据库 `seat_no` 保持 1 起；Java 早期设计稿中的 `SET_READY/PLAYER_ACTION/commandId/actionId` 和增量事件不用于此页面。
 
 ## 1. 活动入口和开房（沿用）
 
@@ -123,22 +123,26 @@ Java 校验 token 所属用户、活动和房间后，依次发送 `AUTH_OK` 与
 
 ## 3. 点击落座、房主管理与起身（本轮前端新增规则）
 
-页面名称为“算法培训班”，页头不再显示黑桃或“活动专属牌局”。
+页面不再显示品牌名称或牌桌水印；活动名称仅作为左上角菜单的标题，优先使用 activity.title。
 
 前端同时检查服务端 `self.allowedCommands` 与自身状态。房主管理区仅 `self.role=CREATOR/HOST` 或 `self.isHost=true` 可见，提供开始、暂停、继续；普通成员即使收到错误的房主管理 allowedCommands，前端也不会显示或发送。Java 必须再次校验真实房主身份。
 
 | 状态/操作 | 授权命令 | 前端发送 |
 | --- | --- | --- |
-| 未落座点击虚线空座 | `SIT_DOWN` | `{"type":"SIT_DOWN","requestId":"uuid","payload":{"seatIndex":2,"expectedRevision":12}}` |
-| 已落座、允许准备（兼容原 Java） | `READY` | `{"type":"READY","requestId":"uuid","payload":{"expectedRevision":12}}` |
-| 已落座，确认起身 | `STAND_UP` | `{"type":"STAND_UP","requestId":"uuid","payload":{"expectedRevision":12}}` |
-| 房主开始游戏，至少两人落座 | `START_HAND` | `{"type":"START_HAND","requestId":"uuid","payload":{"expectedRevision":12}}` |
-| 房主申请本局结束后暂停 | **新增 `PAUSE_GAME`** | `{"type":"PAUSE_GAME","requestId":"uuid","payload":{"afterCurrentHand":true,"expectedRevision":12}}` |
-| 房主继续已暂停游戏，至少两人落座 | **新增 `RESUME_GAME`** | `{"type":"RESUME_GAME","requestId":"uuid","payload":{"expectedRevision":12}}` |
+| 未落座点击虚线空座 | `SIT_DOWN` | `{"type":"SIT_DOWN","requestId":"uuid","payload":{"seatIndex":2}}` |
+| 已落座、允许准备（兼容原 Java） | `READY` | `{"type":"READY","requestId":"uuid","payload":{}}` |
+| 已落座，确认起身 | `STAND_UP` | `{"type":"STAND_UP","requestId":"uuid","payload":{}}` |
+| 房主开始游戏，至少两人落座 | `START_HAND` | `{"type":"START_HAND","requestId":"uuid","payload":{}}` |
+| 房主申请本局结束后暂停 | **新增 `PAUSE_GAME`** | `{"type":"PAUSE_GAME","requestId":"uuid","payload":{"afterCurrentHand":true}}` |
+| 房主继续已暂停游戏，至少两人落座 | **新增 `RESUME_GAME`** | `{"type":"RESUME_GAME","requestId":"uuid","payload":{}}` |
 
 ### 点击虚线空座
 
-点击的 `seatIndex` 始终是服务端真实的零基座位号，不是旋转后的屏幕位置。**现在无论配置 seatingType=0/1，点击座位都会带 seatIndex，Java 应优先采用该指定空座**；只有未提供 seatIndex 的兼容请求才按随机配置选座。当前 Java 随机房间仍忽略 seatIndex，需要调整。
+点击空座根据房间配置发送兼容当前 Java 的消息：`seatingType=1` 自选房间发送 `{"seatIndex":2}`，号码是服务端真实的零基座位号；`seatingType=0` 随机房间发送空 `payload={}`，由 Java 随机选择可用座位。新开房默认自主选座，既有随机房间仍可点击任意空座申请随机入座。
+
+**SIT_DOWN/READY/STAND_UP/START_HAND 不要带 expectedRevision**。现有 Java 用字段白名单校验，SIT_DOWN 只接受 seatIndex（随机房间不允许该字段），READY/STAND_UP/START_HAND 只接受空 payload。expectedRevision 仅用于 ACTION；上一版前端多带这个字段会收到 BAD_PAYLOAD。
+
+空座按钮只在已有请求等待确认时锁定，其余不可落座状态点击后给出连接尚未就绪、已落座、当前手尚未结束或房间不允许落座的提示。旧快照缺少 allowedCommands 时，未落座且没有正在进行的手牌可发送落座申请，最终权限由 Java 校验；明确返回的 allowedCommands=[] 仍尊重拒绝。前端兼容旧 seatNo（1 起）转换为 seatIndex（0 起），显式 seatIndex=null 始终表示未落座。
 
 成功快照需包含更新后的 `self.seatIndex`、`roomMembers[].seatIndex/nickname/avatarUrl/stack/state`，前端收到后才占座，显示头像昵称，并把本人旋转到正下方。没有头像时显示昵称首字。服务端应在同一事务检查空位，两个玩家同时点击同座时仅一人成功；失败发 ERROR 中文提示。已落座玩家不能再次点击其他空位换座，须先确认起身。
 
@@ -200,7 +204,7 @@ Java 校验 token 所属用户、活动和房间后，依次发送 `AUTH_OK` 与
 
 1. 确认原有 entry/rooms 的字段和当前账号登录态交接，错误返回可读中文 message。
 2. AUTH 成功立即发上述 game/seatIndex/legal/revision/allowedCommands 快照，按接收者遮蔽底牌。
-3. 校验现有 SIT_DOWN、READY、STAND_UP、START_HAND、ACTION；按本轮规则支持指定点击座位、两人落座开局，并新增 PAUSE_GAME/RESUME_GAME 与 room.playState，成功发新快照，失败发 ERROR。
+3. 校验现有 SIT_DOWN、READY、STAND_UP、START_HAND、ACTION；核对自选与随机房间落座、两人落座开局，并新增 PAUSE_GAME/RESUME_GAME 与 room.playState，成功发新快照，失败发 ERROR。
 4. 提供 PONG、turnDeadline、关房与认证过期事件，并让服务器处理行动超时、断线与下注幂等。
 
-原有活动 v1 命令已在 Java 实现并有规则、JDBC 事务及 WS 回包测试；本轮新增的点击指定座位、两人落座开局、暂停与继续仍需 Java 更新，之后部署并用真实活动验证。在线人数目前只统计本实例连接；跨实例牌局通过数据库 revision 轮询更新，在线人数租约仍属后续。结算画面可保留；有人起身/换座后 Java 返回 game=null，避免旧玩家占据空座，服务端仍保留下一手手数与庄家轮换。
+原有活动 v1 命令已在 Java 实现并有规则、JDBC 事务及 WS 回包测试；前端已兼容现有 Java 的落座及生命周期 payload；两人无需手动准备开局、暂停与继续仍需 Java 更新，之后部署并用真实活动验证。在线人数目前只统计本实例连接；跨实例牌局通过数据库 revision 轮询更新，在线人数租约仍属后续。结算画面可保留；有人起身/换座后 Java 返回 game=null，避免旧玩家占据空座，服务端仍保留下一手手数与庄家轮换。

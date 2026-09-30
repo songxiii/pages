@@ -5,14 +5,14 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="referrer" content="no-referrer">
   <meta name="theme-color" content="#0d111b">
-  <title>算法培训班</title>
-  <link rel="stylesheet" href="./p.css">
+  <title>活动牌局</title>
+  <link rel="stylesheet" href="./p.css?v=20260930-seat-fix">
 </head>
 <body>
   <main class="page">
     <header class="page-head">
       <button id="room-menu" class="icon-button" type="button" aria-label="房间信息" aria-expanded="false" aria-controls="room-details">☰</button>
-      <div class="brand"><strong id="page-title">算法培训班</strong></div>
+      <div class="page-head-spacer" aria-hidden="true"></div>
       <span id="ws-status" class="connection-status">验证中</span>
       <button id="help-button" class="icon-button" type="button" aria-label="玩法说明" aria-expanded="false" aria-controls="help-panel">?</button>
     </header>
@@ -30,7 +30,7 @@
       <form id="create-form">
         <div class="settings-grid">
           <label>座位人数<select name="maxSeats"><option value="2">2 人</option><option value="3">3 人</option><option value="4">4 人</option><option value="5">5 人</option><option value="6" selected>6 人</option><option value="7">7 人</option><option value="8">8 人</option><option value="9">9 人</option></select></label>
-          <label>入座方式<select name="seatingType"><option value="0">随机落座</option><option value="1">自主选座</option></select></label>
+          <label>入座方式<select name="seatingType"><option value="0">随机落座</option><option value="1" selected>自主选座</option></select></label>
           <label>小盲注<select name="smallBlind"><option>1</option><option>2</option><option>5</option><option selected>10</option><option>25</option><option>50</option></select></label>
           <label>大盲注<select name="bigBlind"><option>2</option><option>4</option><option>10</option><option selected>20</option><option>50</option><option>100</option></select></label>
           <label>初始筹码<select name="startingStack"><option>200</option><option>500</option><option selected>1000</option><option>2000</option><option>5000</option><option>10000</option><option>20000</option></select></label>
@@ -45,7 +45,7 @@
       <div id="play-state-notice" class="play-state-notice" hidden role="status"></div>
       <div class="table-stage" id="table-stage">
         <div class="table-rail"><div class="table-felt"></div></div>
-        <div class="table-center"><span class="table-wordmark">算法培训班</span><span id="table-blinds" class="table-blinds">NLHE</span><div id="board-cards" class="board-cards" aria-label="公共牌"></div><div class="pot-box"><small>底池</small><strong id="table-pot">0</strong></div><p id="table-phase" class="table-phase">等待牌局同步</p><p id="table-result" class="table-result" role="status"></p></div>
+        <div class="table-center"><span id="table-blinds" class="table-blinds">NLHE</span><div id="board-cards" class="board-cards" aria-label="公共牌"></div><div class="pot-box"><small>底池</small><strong id="table-pot">0</strong></div><p id="table-phase" class="table-phase">等待牌局同步</p><p id="table-result" class="table-result" role="status"></p></div>
         <div id="table-seats" class="table-seats"></div><div id="deal-layer" class="deal-layer" aria-hidden="true"></div>
       </div>
       <div id="table-notice" class="table-notice" role="status">正在连接房间…</div>
@@ -77,6 +77,6 @@
     <aside id="help-panel" class="help-panel" hidden><div class="section-head"><h2>牌桌说明</h2><button id="close-help" class="icon-button" type="button" aria-label="关闭说明">×</button></div><p>每人两张底牌，配合五张公共牌组成最好的五张牌。当前玩家固定在牌桌正下方；金色 D 为庄家，蓝色 SB 为小盲，红色 BB 为大盲，亮起的头像表示当前行动玩家。</p><p>轮到你时，可弃牌、过牌或跟注，也可加注。加注金额表示本轮总下注，快捷加注按底池比例计算。点击虚线空座即可申请落座，落座后显示头像和昵称。至少两人落座后，房主可在左上角菜单开始游戏；暂停会在本局结束后生效。已落座玩家可在菜单选择起身，确认后转为旁观。</p></aside>
     <details id="debug-panel" class="debug-panel" hidden><summary>接口调试</summary><form id="login-form"><label for="access-token">联调 Access token</label><input id="access-token" type="password" autocomplete="off" placeholder="当前账号的 access token"><button class="secondary" type="submit">验证并进入</button></form><div class="versions"><span>协议 <strong id="protocol-version">—</strong></span><span>凭证有效至 <strong id="ws-expires">—</strong></span></div><div class="connection-url"><code id="ws-url"></code><button id="copy-ws-url" class="secondary" type="button">复制地址</button></div><h3 id="debug-endpoint">请求接口</h3><pre id="debug-request"></pre><h3>响应</h3><pre id="debug-response"></pre></details>
   </main>
-  <script type="module" src="./src/p.js"></script>
+  <script type="module" src="./src/p.js?v=20260930-seat-fix"></script>
 </body>
 </html>
