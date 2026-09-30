@@ -12,6 +12,16 @@ const SEAT_LAYOUTS = {
   8: [[50, 89], [11, 73], [11, 48], [25, 23], [50, 13], [75, 23], [89, 48], [89, 73]],
   9: [[50, 89], [11, 74], [11, 53], [11, 32], [34, 13], [66, 13], [89, 32], [89, 53], [89, 74]],
 };
+const WIDE_SEAT_LAYOUTS = {
+  2: [[50, 88], [50, 15]],
+  3: [[50, 88], [18, 25], [82, 25]],
+  4: [[50, 88], [10, 50], [50, 13], [90, 50]],
+  5: [[50, 88], [12, 65], [30, 20], [70, 20], [88, 65]],
+  6: [[50, 88], [13, 67], [13, 28], [50, 13], [87, 28], [87, 67]],
+  7: [[50, 88], [20, 76], [10, 38], [35, 13], [65, 13], [90, 38], [80, 76]],
+  8: [[50, 88], [20, 76], [9, 43], [30, 15], [50, 12], [70, 15], [91, 43], [80, 76]],
+  9: [[50, 88], [25, 78], [9, 54], [9, 26], [34, 13], [66, 13], [91, 26], [91, 54], [75, 78]],
+};
 export const formatChips = (value) => Number.isFinite(Number(value)) ? Number(value).toLocaleString("zh-CN", { maximumFractionDigits: 2 }) : "—";
 const identity = (member) => member?.userId ?? member?.id;
 export function seatIndex(player) {
@@ -30,10 +40,26 @@ export function ownSeat(view) {
   const seat = seatIndex(member);
   return seat === null ? null : Number(seat);
 }
-export function tableLayout(count, selfSeat = null) {
+export function tableLayout(count, selfSeat = null, wide = false) {
   const size = Math.min(9, Math.max(2, Math.floor(Number(count)) || 6));
   const anchor = Number.isInteger(selfSeat) && selfSeat >= 0 && selfSeat < size ? selfSeat : 0;
-  return SEAT_LAYOUTS[size].map(([x, y], index) => ({ seatIndex: (index + anchor) % size, x, y }));
+  // A wide screen spreads seats around a horizontal ellipse instead of stacking sides.
+  return (wide ? WIDE_SEAT_LAYOUTS : SEAT_LAYOUTS)[size].map(([x, y], index) => ({ seatIndex: (index + anchor) % size, x, y }));
+}
+export function playerReady(view, member) {
+  if (view.game && view.game.phase !== "complete") return false;
+  const mine = identity(member) != null && String(identity(member)) === String(identity(view.self))
+    || seatIndex(member) !== null && ownSeat(view) !== null && Number(seatIndex(member)) === ownSeat(view);
+  return member?.ready === true || member?.state === "READY" || (mine && (view.self?.ready === true || view.self?.roomState === "READY"));
+}
+export function buyInOptions(view) {
+  const config = view.room?.buyIn;
+  if (!config || !Number.isSafeInteger(config.minAmount) || !Number.isSafeInteger(config.maxAmount)
+      || config.minAmount <= 0 || config.maxAmount < config.minAmount || !Number.isSafeInteger(config.step) || config.step <= 0) return [];
+  const base = Number(view.room?.settings?.startingStack) || config.minAmount;
+  const values = Array.isArray(config.options) ? config.options : [config.minAmount, base, base * 2, base * 5, config.maxAmount];
+  return [...new Set(values.filter((amount) => Number.isSafeInteger(amount) && amount >= config.minAmount && amount <= config.maxAmount
+    && (amount - config.minAmount) % config.step === 0))].sort((a, b) => a - b);
 }
 // Prefer authoritative hand roles; the fallback uses participants, not room capacity
 // or bet amounts (which change after raises). Explicit null supports a dead button.
@@ -74,10 +100,15 @@ export function roomControls(view) {
   // Older snapshots omit command capabilities. Java still validates the request.
   const canSit = own === null && (Array.isArray(view.self?.allowedCommands) ? allowed.includes("SIT_DOWN")
     : !inHand && view.room?.status !== "CLOSED" && !["ENDED", "CANCELLED"].includes(view.activity?.status));
-  return { host, seatedCount: seated.length, seated: own !== null, inHand, paused, pausePending,
+  const member = members.find((member) => identity(member) != null && String(identity(member)) === String(identity(view.self)));
+  const ready = own !== null && playerReady(view, member || { ...view.self, state: view.self?.roomState });
+  const readyCount = members.filter((m) => seatIndex(m) !== null && playerReady(view, m)).length;
+  return { host, seatedCount: seated.length, readyCount, seated: own !== null, ready, inHand, paused, pausePending,
     canSit,
     canStand: own !== null && allowed.includes("STAND_UP"),
-    canReady: own !== null && allowed.includes("READY"),
+    canReady: own !== null && !inHand && !ready && allowed.includes("READY"),
+    canUnready: own !== null && !inHand && ready && allowed.includes("UNREADY"),
+    canBuyIn: allowed.includes("BUY_IN") && buyInOptions(view).length > 0,
     canStart: host && seated.length >= 2 && !inHand && !paused && !pausePending && allowed.includes("START_HAND"),
     canPause: host && !paused && !pausePending && (inHand || playState === "RUNNING") && allowed.includes("PAUSE_GAME"),
     canResume: host && paused && !inHand && seated.length >= 2 && allowed.includes("RESUME_GAME"),
@@ -93,6 +124,23 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
   let lastHand = null, lastBoard = [], timer = null, deadline = null, currentTimer = null, currentSeconds = null;
   let lastLayoutKey = null, dealCleanupTimer = null;
   let seatButtons = [], openSeats = new Set();
+  let standConfirmOpen = false;
+  function currentLayout() {
+    const stage = $("table-stage");
+    return tableLayout(view.room?.settings?.maxSeats || Math.max(2, ...(game?.players || []).map((p) => p.seatIndex + 1)), ownSeat(view), stage.clientWidth > stage.clientHeight * 1.2);
+  }
+  function resize() {
+    const stage = $("table-stage"), wide = stage.clientWidth > stage.clientHeight * 1.2;
+    stage.setAttribute("data-wide", String(wide));
+    stage.style.setProperty("--seat-size", Math.min(76, stage.clientWidth * .15, stage.clientHeight * (wide ? .11 : .115)) + "px");
+    const layout = currentLayout();
+    for (const el of $("table-seats").children) {
+      const place = layout.find((p) => String(p.seatIndex) === el.getAttribute("data-seat-index"));
+      if (!place) continue;
+      el.style.setProperty("--x", place.x + "%"); el.style.setProperty("--y", place.y + "%");
+      el.classList.toggle("right", place.x > 50); el.classList.toggle("top", place.y < 25); el.classList.toggle("bottom", place.y > 80);
+    }
+  }
   const node = (tag, className, value) => {
     const el = document.createElement(tag); el.className = className;
     if (value != null) el.textContent = String(value);
@@ -157,6 +205,23 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     $("stand-up").disabled = !enabledControl || !controls.canStand;
     $("ready-player").hidden = !controls.canReady;
     $("ready-player").disabled = !enabledControl || !controls.canReady;
+    $("unready-player").hidden = !controls.ready;
+    $("unready-player").disabled = !enabledControl || !controls.canUnready;
+    $("ready-detail").hidden = !controls.ready || controls.canUnready;
+    $("ready-detail").textContent = "已准备，当前房间暂不支持取消准备。";
+    const ownMember = (view.roomMembers || []).find((member) => identity(member) != null && String(identity(member)) === String(identity(view.self)));
+    const handPlayer = game?.phase !== "complete" ? game?.players?.find((p) => p.seatIndex === ownSeat(view)) : null;
+    const pendingBuyIn = Number(view.self?.pendingBuyIn ?? ownMember?.pendingBuyIn ?? 0);
+    $("buy-in-balance").textContent = "当前筹码 " + formatChips(handPlayer?.stack ?? ownMember?.stack ?? view.self?.stack ?? 0)
+      + (pendingBuyIn > 0 ? " · 待到账 +" + formatChips(pendingBuyIn) : "");
+    const amounts = buyInOptions(view), select = $("buy-in-amount"), chosen = Number(select.value);
+    select.replaceChildren(...amounts.map((amount) => { const option = node("option", "", formatChips(amount)); option.value = String(amount); return option; }));
+    select.value = String(amounts.includes(chosen) ? chosen : amounts[0] ?? "");
+    select.disabled = !enabledControl || !controls.canBuyIn;
+    $("submit-buy-in").disabled = !enabledControl || !controls.canBuyIn;
+    $("buy-in-detail").textContent = !controls.canBuyIn ? "当前房间暂未开放带入筹码。"
+      : pendingBuyIn > 0 ? "带入已确认，本局结算后到账。可继续追加。"
+      : controls.inHand ? "本局中追加的筹码将在本局结束后到账。" : "追加筹码将在确认后立即到账。";
     $("start-hand").hidden = !controls.host || controls.paused;
     $("start-hand").disabled = !enabledControl || !controls.canStart;
     $("pause-game").hidden = !controls.host || controls.paused;
@@ -167,15 +232,16 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     $("host-control-detail").textContent = controls.pausePending ? "当前这手继续进行，结算完成后暂停，不再发下一手。"
       : controls.paused ? (controls.seatedCount < 2 ? "游戏已暂停，至少 2 人落座后可继续。" : "游戏已暂停，继续后恢复发牌。")
       : controls.seatedCount < 2 ? "至少需要 2 人落座，目前 " + controls.seatedCount + " 人。"
-      : controls.inHand ? "牌局进行中，暂停会在本局结束后生效。" : controls.canStart ? "已有 " + controls.seatedCount + " 人落座，可以开始游戏。" : "已有 " + controls.seatedCount + " 人落座，等待房间开放开始操作。";
+      : controls.inHand ? "牌局进行中，暂停会在本局结束后生效。" : controls.canStart ? "已有 " + controls.seatedCount + " 人落座，可以开始游戏。" : "已落座 " + controls.seatedCount + " 人，已准备 " + controls.readyCount + " 人，等待开局条件满足。";
     $("play-state-notice").hidden = !controls.paused && !controls.pausePending;
     $("play-state-notice").textContent = controls.paused ? "游戏已暂停 · 等待房主继续" : "房主已申请暂停 · 本局结束后生效";
   }
   function command(type, payload = {}) {
     if (pending) { reportError("正在处理上一项操作，请稍候…"); return; }
-    if (!connected) { reportError("牌桌连接尚未就绪，请稍候或在菜单中重新连接。"); return; }
+    if (!connected) { $("table-notice").textContent = "牌桌连接尚未就绪，请稍候或在菜单中重新连接。"; return; }
     const controls = roomControls(view);
     const permission = { SIT_DOWN: controls.canSit && openSeats.has(payload.seatIndex), READY: controls.canReady,
+      UNREADY: controls.canUnready, BUY_IN: controls.canBuyIn && buyInOptions(view).includes(payload.amount),
       STAND_UP: controls.canStand, START_HAND: controls.canStart, PAUSE_GAME: controls.canPause, RESUME_GAME: controls.canResume };
     if (!permission[type]) {
       if (type === "SIT_DOWN") reportError(controls.seated ? "你已落座，请先在菜单中确认起身。"
@@ -206,10 +272,9 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     const players = (game?.players || []).map((p) => ({ ...p, seatIndex: Number(seatIndex(p) ?? p.id) }));
     if (game) game = { ...game, players, turn: game.turn == null ? null : Number(game.turn) };
     const members = view.roomMembers || [];
-    const count = settings.maxSeats || Math.max(2, ...players.map((p) => p.seatIndex + 1));
     const handKey = game?.handId ?? game?.handNumber ?? null;
     const newHand = handKey !== null && handKey !== lastHand;
-    const layout = tableLayout(count, selfSeat);
+    const layout = currentLayout();
     const roles = handPositions(game);
     const layoutKey = layout.length + ":" + selfSeat;
     if (layoutKey !== lastLayoutKey) {
@@ -222,7 +287,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     for (const place of layout) {
       const player = players.find((p) => p.seatIndex === place.seatIndex);
       const member = members.find((m) => Number(seatIndex(m)) === place.seatIndex && seatIndex(m) !== null);
-      const person = player || member;
+      const person = game?.phase === "complete" ? member || player : player || member;
       const mine = selfSeat === place.seatIndex;
       const current = game?.turn === place.seatIndex && game?.phase !== "complete";
       const el = node(person ? "div" : "button", "seat" + (!person ? " empty" : "") + (mine ? " self" : "")
@@ -254,6 +319,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
       }
       if (markers.children.length) label.append(markers);
       el.append(avatar);
+      if (person && playerReady(view, member || person)) el.append(node("span", "seat-readiness", "已准备"));
       if (player?.hole?.length) {
         const hole = node("div", "hole-cards");
         // Never reveal another player's hole cards before an explicit showdown.
@@ -284,7 +350,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     clearInterval(timer); updateClock();
     if (currentTimer && Number.isFinite(deadline)) timer = setInterval(updateClock, 1000);
     if (newHand) animateDeal(layout.filter((p) => players.find((player) => player.seatIndex === p.seatIndex && player.hole?.length)));
-    lastHand = handKey; lastBoard = [...cards]; updateActions();
+    lastHand = handKey; lastBoard = [...cards]; updateActions(); resize();
   }
   function animateDeal(layout) {
     clearTimeout(dealCleanupTimer);
@@ -312,16 +378,20 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
   $("raise-range").addEventListener("input", () => { $("raise-value").textContent = formatChips($("raise-range").value); });
   $("raise-editor").addEventListener("submit", (event) => { event.preventDefault(); act("raise", Number($("raise-range").value)); });
   $("all-in-action").addEventListener("click", () => act("raise", game?.legal?.maxRaiseTo));
-  $("stand-up").addEventListener("click", () => {
-    if (!connected || pending || !roomControls(view).canStand) return;
-    if (confirmStand()) command("STAND_UP");
+  $("stand-up").addEventListener("click", async () => {
+    if (!connected || pending || standConfirmOpen || !roomControls(view).canStand) return;
+    standConfirmOpen = true;
+    try { if (await confirmStand() && connected && !pending && roomControls(view).canStand) command("STAND_UP"); }
+    finally { standConfirmOpen = false; }
   });
-  for (const [id, type] of [["ready-player", "READY"], ["start-hand", "START_HAND"], ["pause-game", "PAUSE_GAME"], ["resume-game", "RESUME_GAME"]]) {
+  for (const [id, type] of [["ready-player", "READY"], ["unready-player", "UNREADY"], ["start-hand", "START_HAND"], ["pause-game", "PAUSE_GAME"], ["resume-game", "RESUME_GAME"]]) {
     $(id).addEventListener("click", () => command(type, type === "PAUSE_GAME" ? { afterCurrentHand: true } : {}));
   }
+  $("buy-in-form").addEventListener("submit", (event) => { event.preventDefault(); command("BUY_IN", { amount: Number($("buy-in-amount").value) }); });
 
   return {
     render,
+    resize,
     setConnected(value, notice) { connected = value; updateActions(); if (notice) $("table-notice").textContent = notice; },
     reject(message) { clearTimeout(pendingTimer); pending = false; updateActions(); $("table-notice").textContent = message; },
     reset() { clearInterval(timer); clearTimeout(pendingTimer); clearTimeout(dealCleanupTimer); $("deal-layer").replaceChildren(); lastLayoutKey = null; lastHand = null; lastBoard = []; connected = false; pending = false; updateActions(); },

@@ -131,6 +131,8 @@ Java 校验 token 所属用户、活动和房间后，依次发送 `AUTH_OK` 与
 | --- | --- | --- |
 | 未落座点击虚线空座 | `SIT_DOWN` | `{"type":"SIT_DOWN","requestId":"uuid","payload":{"seatIndex":2}}` |
 | 已落座、允许准备（兼容原 Java） | `READY` | `{"type":"READY","requestId":"uuid","payload":{}}` |
+| 已准备，取消准备 | **新增 `UNREADY`** | `{"type":"UNREADY","requestId":"uuid","payload":{}}` |
+| 追加带入筹码 | **新增 `BUY_IN`** | `{"type":"BUY_IN","requestId":"uuid","payload":{"amount":400}}` |
 | 已落座，确认起身 | `STAND_UP` | `{"type":"STAND_UP","requestId":"uuid","payload":{}}` |
 | 房主开始游戏，至少两人落座 | `START_HAND` | `{"type":"START_HAND","requestId":"uuid","payload":{}}` |
 | 房主申请本局结束后暂停 | **新增 `PAUSE_GAME`** | `{"type":"PAUSE_GAME","requestId":"uuid","payload":{"afterCurrentHand":true}}` |
@@ -150,7 +152,7 @@ Java 校验 token 所属用户、活动和房间后，依次发送 `AUTH_OK` 与
 
 前端从当前完整 `roomMembers` 计算实际有效座位数量，排除旁观/起身、空座和重复座位，不仅信任 counts.seatedCount。人数不足 2、当前手未结束或已申请暂停时，开始按钮禁用；普通成员永远没有此控制。
 
-**用户本轮要求：至少两人落座后就能由房主开始，无需另行手动准备。** 当前 Java 要求至少两名已准备且有筹码的成员，并据此提供 START_HAND，尚需按新规则修改。修改前前端保留服务端授权的 READY 菜单用于兼容旧服务；新服务可以不再提供 READY，只在人数/筹码/牌局状态满足时提供 START_HAND。成功后由 Java 发牌并广播 SNAPSHOT，前端不自行开手。
+用户此前要求至少两人落座才能开始；当前补充要求是：如果保留准备机制，牌桌要显示准备状态并提供取消准备。当前 Java 要求至少两名已准备且有筹码的成员，前端兼容此规则，显示准备人数与座位“已准备”标记。若服务改为两人落座直接开局，可以不再授权 READY/UNREADY；若保留准备机制，则必须补齐 UNREADY。最终 START_HAND 始终以服务端授权和校验为准。成功后由 Java 发牌并广播 SNAPSHOT，前端不自行开手。
 
 ### 暂停与继续（需要 Java 新增）
 
@@ -175,7 +177,7 @@ Java 校验 token 所属用户、活动和房间后，依次发送 `AUTH_OK` 与
 
 ### 起身确认
 
-所有已落座用户，包括房主和普通成员，都能看到“我的座位 → 起身”；旁观者完全不显示此项。点击后调用原生 `window.confirm`，取消不发送请求、不锁定控件；确认后发送 STAND_UP。成功快照明确返回 self.seatIndex=null 及新的成员列表，前端再转旁观。
+所有已落座用户，包括房主和普通成员，都能看到“我的座位 → 起身”；旁观者完全不显示此项。点击后打开页面自定义确认弹框（入场动画、背景模糊、继续落座/确认起身），不使用浏览器 window.confirm。取消、Esc 不发送请求；确认时重新检查最新权限后发送 STAND_UP。成功快照明确返回 self.seatIndex=null 及新的成员列表，前端再转旁观。
 
 沿用 Java 的安全约束：当前手进行时若不允许立即起身，不提供 STAND_UP，菜单显示禁用选项；两手之间再开放。不要在一手尚未结算时直接清除参局玩家的筹码或底池权益。客户端确认不代替服务端身份、状态与筹码校验。
 
@@ -204,7 +206,68 @@ Java 校验 token 所属用户、活动和房间后，依次发送 `AUTH_OK` 与
 
 1. 确认原有 entry/rooms 的字段和当前账号登录态交接，错误返回可读中文 message。
 2. AUTH 成功立即发上述 game/seatIndex/legal/revision/allowedCommands 快照，按接收者遮蔽底牌。
-3. 校验现有 SIT_DOWN、READY、STAND_UP、START_HAND、ACTION；核对自选与随机房间落座、两人落座开局，并新增 PAUSE_GAME/RESUME_GAME 与 room.playState，成功发新快照，失败发 ERROR。
+3. 校验现有 SIT_DOWN、READY、STAND_UP、START_HAND、ACTION；核对自选与随机房间落座、当前准备/开局规则，并新增 UNREADY/BUY_IN（第 5 节）、PAUSE_GAME/RESUME_GAME 与 room.playState，成功发新快照，失败发 ERROR。
 4. 提供 PONG、turnDeadline、关房与认证过期事件，并让服务器处理行动超时、断线与下注幂等。
 
-原有活动 v1 命令已在 Java 实现并有规则、JDBC 事务及 WS 回包测试；前端已兼容现有 Java 的落座及生命周期 payload；两人无需手动准备开局、暂停与继续仍需 Java 更新，之后部署并用真实活动验证。在线人数目前只统计本实例连接；跨实例牌局通过数据库 revision 轮询更新，在线人数租约仍属后续。结算画面可保留；有人起身/换座后 Java 返回 game=null，避免旧玩家占据空座，服务端仍保留下一手手数与庄家轮换。
+原有活动 v1 命令已在 Java 实现并有规则、JDBC 事务及 WS 回包测试；前端已兼容现有 Java 的落座及生命周期 payload；取消准备、追加带入、暂停与继续仍需 Java 更新，之后部署并用真实活动验证。在线人数目前只统计本实例连接；跨实例牌局通过数据库 revision 轮询更新，在线人数租约仍属后续。结算画面可保留；有人起身/换座后 Java 返回 game=null，避免旧玩家占据空座，服务端仍保留下一手手数与庄家轮换。
+
+
+## 5. 本次新增需求：取消准备、带入筹码及当前后端缺口
+
+以下核对的是相邻 Java 仓库当前源码，未代表公网已部署版本。前端已接入下面的命令与快照字段；旧服务没有授权时，按钮显示未开放/不可用，不发送 UNKNOWN_COMMAND，不自行变更准备或筹码。
+
+| 项目 | 当前 Java | 本次前端 |
+|---|---|---|
+| READY 与准备状态 | 已实现，成员含 ready/state | 座位头像旁显示“已准备”，菜单显示准备人数 |
+| UNREADY 取消准备 | 未实现 | 菜单入口及空 payload 已接入 |
+| BUY_IN 追加带入 | 仅入房时赠送 startingStack；无追加命令 | 菜单下拉、当前余额、待到账金额已接入 |
+| PAUSE_GAME / RESUME_GAME | 未实现，无 room.playState | 现有入口待服务授权 |
+| 起身确认、短屏一屏、连接静默重试 | 无需新增接口 | 页面确认动画；动态高度/横屏座位；网络失败只显示状态，最多自动重试 3 次 |
+
+### 5.1 取消准备
+
+```json
+{"type":"UNREADY","requestId":"uuid","payload":{}}
+```
+
+- 在命令白名单和 WS 路由中加入 UNREADY。身份、活动资格、房间状态按现有 READY 校验；仅已落座、ready=true、当前没有运行中手牌可取消。牌局已经开始时返回 HAND_RUNNING。
+- 房间行锁内将本人 ready=false，保留座位和筹码，递增 revision，按 requestId 幂等记录，广播 SNAPSHOT。
+- 快照同步 `self.roomState=SEATED`、`roomMembers[].state=SEATED`、`ready=false`。已准备且可取消时授权 UNREADY（不再授权 READY）；取消后反过来。
+- READY 和 START_HAND 并发按同一房间行锁序列化。若取消先成功，开局必须按最新准备人数再校验。若开局先成功，取消返回 HAND_RUNNING。
+
+### 5.2 追加带入筹码
+
+金额表示**追加数量**，不会覆盖原余额或输赢，不允许负数提现。使用同一 WebSocket，不需要另建 HTTP 接口：
+
+```json
+{"type":"BUY_IN","requestId":"uuid","payload":{"amount":400}}
+```
+
+在入口、创建返回和每次 SNAPSHOT 的 room 中提供金额配置；只有实际可申请时，在 `self.allowedCommands` 加入 BUY_IN。允许当前活动成员在旁观/已起身/已落座/参局中追加，款项归用户永久筹码账本，不归临时座位编号。
+
+```json
+{
+  "room": {
+    "buyIn": {"minAmount":200,"maxAmount":2000,"step":200,"options":[200,400,1000,2000]}
+  },
+  "self": {"stack":600,"pendingBuyIn":400,"allowedCommands":["BUY_IN"]},
+  "roomMembers": [{"userId":"u1","seatIndex":0,"stack":600,"pendingBuyIn":400,"totalBuyIn":1000}]
+}
+```
+
+- `self.stack/self.pendingBuyIn` 对旁观和起身用户也必须返回；roomMembers 中每人的 pendingBuyIn 必须实时同步，金额未到账前不能混入 stack。
+- `minAmount/maxAmount` 为单次追加范围；`step` 表示从 minAmount 起的增量单位，金额须满足 `(amount-minAmount)%step=0`，正整数且不超过 JavaScript 安全整数。`options` 是合法下拉金额，建议必填。前端过滤非法选项；Java 必须再次校验，不信任客户端。
+- 增加带入流水：用户、roomId、requestId、amount、提交时 handId（可空）、状态 PENDING/APPLIED、创建/生效时间；在永久成员账本增加 pendingBuyIn 聚合值。复用现有去重存储，唯一键按 roomId/userId/requestId。相同 ID 相同请求不重复增加，相同 ID 不同金额返回 REQUEST_ID_REUSED。
+- **没有运行中手牌（包括首次开局前、两局之间、暂停中）**：在事务内 `stack += amount`、`totalBuyIn += amount`，流水直接 APPLIED，递增 revision 并广播 SNAPSHOT。成员准备状态不因单纯追加而被静默改变。
+- **存在运行中手牌**：流水标记 PENDING，聚合 `pendingBuyIn += amount`，立即广播新 revision 的 SNAPSHOT 作为“申请已确认”；本人游戏 player.stack、ledger.stack、本局底池、legal.maxRaiseTo、下注上限保持不变。即使本人已经弃牌或是旁观，也等这手结算结束后生效。
+- **结算边界**：在同一事务先完成全部底池/边池分配并保存所有游戏玩家结算余额，再对全部成员（含未参局成员）应用待到账流水：`stack += pendingBuyIn`、`totalBuyIn += pendingBuyIn`，清零 pendingBuyIn，流水改 APPLIED。完成后才广播 complete 快照，才允许下一次 START_HAND。否则现有 persistHand 覆写 ledger.stack 会吞掉追加筹码。
+- 全局筹码守恒校验只统计当前手进入时的筹码与底池；待到账金额不属于本局。完成快照中 roomMembers.stack 是**含新带入的账本余额**，game.players.stack 可保留本手结算结果；前端在 complete 阶段优先显示成员账本，避免显示旧金额。
+- 行锁串行化 BUY_IN 与结算/开局，服务重启后从持久 PENDING 流水恢复；应用需事务原子性，重复超时结算或跨实例处理不会再次入账。申请开始时检查“余额+所有待到账+本次金额”及房间筹码总上限，避免结算时溢出。
+- 若活动结束/房间关闭与当前局结算同时发生：已受理的 pending 必须先结算到账，之后关闭；关闭后拒绝新申请。不得丢弃或悄悄撤销已确认金额。
+- 拒绝时按现有 ERROR 返回中文原因和原 requestId，建议代码 BUY_IN_DISABLED、BAD_BUY_IN_AMOUNT、CHIP_LIMIT、ROOM_CLOSED、NOT_ROOM_MEMBER；失败不写流水、不改余额。
+
+### 5.3 连接与界面约定
+
+连接 onerror、onclose、认证/快照超时仅更新顶部状态、牌桌提示和菜单连接说明，不弹异常框。自动重试使用 1.5/3/6 秒退避，重新取入口凭证再认证；后台入口网络/5xx失败保持现有牌桌并继续重试，3 次失败后保留手动重连。业务 ERROR、AUTH_EXPIRED 与接口业务异常仍可查看脱敏请求/返回详情。
+
+右上角已移除问号和全屏按钮。牌桌按可用浏览器高度压缩，横屏时变为横向椭圆，保持本人在底部；打开加注编辑器为浮层，不把操作区推到屏幕外。房间配置、成员和连接信息放在菜单折叠详情中。

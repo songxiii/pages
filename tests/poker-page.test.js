@@ -15,9 +15,10 @@ function element() {
     style: { values: {}, setProperty(name, value) { this.values[name] = value; } },
     classList: { toggle() {} },
     setAttribute(name, value) { this.attributes[name] = value; },
+    getAttribute(name) { return this.attributes[name]; },
     remove() { this.removed = true; },
     showModal() { this.open = true; },
-    close() { this.open = false; },
+    close(value = "") { this.open = false; this.returnValue = value; this.listeners.close?.(); },
     addEventListener(type, handler) { this.listeners[type] = handler; },
     querySelector() { return this.submitButton ||= element(); },
     replaceChildren(...items) { this.children = items; },
@@ -32,8 +33,6 @@ function mount(responses, initialToken = "", options = {}) {
   const calls = [];
   const sockets = [];
   const copied = [];
-  const confirmations = [];
-  const confirmResults = [...(options.confirmResults || [])];
   const intervals = new Map();
   const timeouts = new Map();
   let timerId = 0;
@@ -53,23 +52,10 @@ function mount(responses, initialToken = "", options = {}) {
   const document = { body: element(), documentElement: element(), listeners: {},
     addEventListener(type, handler) { this.listeners[type] = handler; },
     getElementById(id) { return elements[id]; }, createElement: element };
-  const fullscreenCalls = [];
-  if (options.fullscreen) {
-    document.documentElement.requestFullscreen = async (settings) => {
-      fullscreenCalls.push(settings);
-      if (options.fullscreenError) throw options.fullscreenError;
-      document.fullscreenElement = document.documentElement;
-      document.listeners.fullscreenchange();
-    };
-    document.exitFullscreen = async () => {
-      document.fullscreenElement = null;
-      document.listeners.fullscreenchange();
-    };
-  }
   runInNewContext(script, {
     POKER_API_BASE_URL: options.apiBase || "https://api.example.com",
     ticketFromLocation, ticketFragmentUrl, validateSettings, redactCredentials, normalizeWebSocketUrl,
-    window: { confirm(value) { confirmations.push(value); return confirmResults.shift() ?? false; }, location: { href: "https://example.com/p.html#ticket=v1.k1.test", protocol: "https:", search: "", hash: "#ticket=v1.k1.test" } },
+    window: { location: { href: "https://example.com/p.html#ticket=v1.k1.test", protocol: "https:", search: "", hash: "#ticket=v1.k1.test" } },
     WebSocket: FakeWebSocket, crypto: webcrypto,
     navigator: { clipboard: { async writeText(value) { copied.push(value); } } },
     document,
@@ -94,7 +80,7 @@ function mount(responses, initialToken = "", options = {}) {
     setInterval(fn) { const id = ++timerId; intervals.set(id, fn); return id; },
     clearInterval(id) { intervals.delete(id); },
   });
-  return { elements, calls, storage, sockets, copied, intervals, timeouts, confirmations, document, fullscreenCalls };
+  return { elements, calls, storage, sockets, copied, intervals, timeouts, document };
 }
 
 const version = "20260930112134";
@@ -273,14 +259,14 @@ test("握手和认证错误在后续 close 事件后仍可见", async () => {
   await new Promise(setImmediate);
   sockets[0].onerror();
   sockets[0].onclose({ code: 1006, reason: "" });
-  assert.equal(elements["ws-status"].textContent, "连接错误");
+  assert.equal(elements["ws-status"].textContent, "重连中");
   assert.match(elements["ws-detail"].textContent, /TLS.*1006/);
   await elements["connect-ws"].listeners.click();
   sockets[1].open();
   sockets[1].receive({ type: "AUTH_EXPIRED", payload: { message: "连接凭证已过期" } });
   sockets[1].onclose({ code: 4001, reason: "AUTH_EXPIRED" });
   assert.match(elements["ws-detail"].textContent, /连接凭证已过期.*4001.*AUTH_EXPIRED/);
-  assert.equal(elements["ws-status"].textContent, "连接错误");
+  assert.equal(elements["ws-status"].textContent, "重连中");
 });
 
 test("HTTPS 页面拒绝明文 WS 地址，旧连接事件不影响新连接", async () => {
@@ -485,23 +471,24 @@ test("暂停请求明确等待本局结束，申请后仍允许本手行动，�
   assert.equal(sockets[0].sent.at(-1).type, "RESUME_GAME");
 });
 
-test("所有已落座成员可起身，取消 confirm 不发送操作，确认后才发送；旁观者不显示起身", async () => {
-  const { elements, sockets, confirmations } = mount([roomResponse()], "", { confirmResults: [false, true] });
+test("起身使用页面确认动画，取消不发请求，确认后发 STAND_UP，旁观者隐藏选项", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
   await new Promise(setImmediate); authenticate(sockets[0]);
   const first = lobbySnapshot({ self: { userId: "u1", role: "MEMBER", seatIndex: 1, roomState: "SEATED", allowedCommands: ["STAND_UP"] } });
   sockets[0].receive({ type: "SNAPSHOT", payload: first });
   assert.equal(elements["host-controls"].hidden, true);
-  assert.equal(elements["stand-up"].hidden, false);
-  elements["stand-up"].listeners.click();
+  const cancelled = elements["stand-up"].listeners.click();
+  assert.equal(elements["stand-dialog"].open, true);
+  elements["cancel-stand"].listeners.click(); await cancelled;
   assert.equal(sockets[0].sent.filter((frame) => frame.type === "STAND_UP").length, 0);
-  assert.equal(elements["stand-up"].disabled, false);
-  elements["stand-up"].listeners.click();
-  assert.equal(confirmations.length, 2);
+  const accepted = elements["stand-up"].listeners.click();
+  elements["confirm-stand"].listeners.click(); await accepted;
   assert.equal(sockets[0].sent.at(-1).type, "STAND_UP");
+  assert.deepEqual(sockets[0].sent.at(-1).payload, {});
   sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: 2, self: { ...first.self, seatIndex: null }, roomMembers: [] } });
   assert.equal(elements["stand-up"].hidden, true);
-  elements["stand-up"].listeners.click();
-  assert.equal(confirmations.length, 2);
+  await elements["stand-up"].listeners.click();
+  assert.equal(elements["stand-dialog"].open, false);
   assert.equal(sockets[0].sent.filter((frame) => frame.type === "STAND_UP").length, 1);
 });
 
@@ -516,7 +503,7 @@ test("页面不显示品牌名称，菜单标题优先使用活动名称", async
 });
 
 test("随机落座发送空 payload，准备、起身和开始不夹带 Java 不接受的 revision 字段", async () => {
-  const { elements, sockets } = mount([roomResponse()], "", { confirmResults: [true] });
+  const { elements, sockets } = mount([roomResponse()]);
   await new Promise(setImmediate); authenticate(sockets[0]);
   const first = lobbySnapshot(); sockets[0].receive({ type: "SNAPSHOT", payload: first });
   elements["table-seats"].children.find((seat) => seat.className.includes(" empty")).listeners.click();
@@ -526,7 +513,8 @@ test("随机落座发送空 payload，准备、起身和开始不夹带 Java 不
     roomMembers: [...first.roomMembers, { userId: "host", seatIndex: 2, state: "SEATED" }] };
   for (const [id, type] of [["ready-player", "READY"], ["start-hand", "START_HAND"], ["stand-up", "STAND_UP"]]) {
     sockets[0].receive({ type: "SNAPSHOT", payload: { ...seated, revision: seated.revision++ } });
-    elements[id].listeners.click();
+    const completion = elements[id].listeners.click();
+    if (type === "STAND_UP") { elements["confirm-stand"].listeners.click(); await completion; }
     assert.equal(sockets[0].sent.at(-1).type, type);
     assert.deepEqual(sockets[0].sent.at(-1).payload, {});
   }
@@ -629,36 +617,103 @@ test("操作超时弹框包含已发送的操作与未收到响应说明", async
   assert.match(elements["error-response"].textContent, /"received": false/);
 });
 
-test("全屏按钮请求隐藏浏览器导航，进入和外部退出全屏时同步文字，点击可取消全屏", async () => {
-  const { elements, document, fullscreenCalls } = mount([roomResponse()], "", { fullscreen: true });
-  await new Promise(setImmediate);
-  assert.equal(elements["fullscreen-button"].textContent, "全屏");
-  await elements["fullscreen-button"].listeners.click();
-  assert.equal(fullscreenCalls[0].navigationUI, "hide");
-  assert.equal(elements["fullscreen-button"].textContent, "取消全屏");
-  assert.equal(elements["fullscreen-button"].attributes["aria-pressed"], "true");
-  document.fullscreenElement = null;
-  document.listeners.fullscreenchange();
-  assert.equal(elements["fullscreen-button"].textContent, "全屏");
-  await elements["fullscreen-button"].listeners.click();
-  await elements["fullscreen-button"].listeners.click();
-  assert.equal(document.fullscreenElement, null);
-  assert.equal(elements["fullscreen-button"].textContent, "全屏");
-});
-
-test("浏览器不支持或拒绝全屏时弹框解释原因，不误显示取消全屏", async () => {
-  for (const options of [{}, { fullscreen: true, fullscreenError: new TypeError("Permission denied") }]) {
-    const { elements } = mount([roomResponse()], "", options);
-    await new Promise(setImmediate);
-    await elements["fullscreen-button"].listeners.click();
-    assert.equal(elements["error-dialog"].open, true);
-    assert.match(elements["error-dialog-message"].textContent, /不支持网页全屏|Permission denied/);
-    assert.match(elements["error-request"].textContent, /requestFullscreen/);
-    assert.equal(elements["fullscreen-button"].textContent, "全屏");
-  }
+test("右上角帮助及全屏功能已移除，不调用浏览器原生确认", () => {
+  const page = readFileSync(new URL("../p.html", import.meta.url), "utf8");
+  assert.doesNotMatch(page, /id="(?:help-button|fullscreen-button|help-panel)"/);
+  assert.doesNotMatch(script, /window\.confirm|requestFullscreen|exitFullscreen/);
 });
 
 test("房间菜单不包含房间 ID 展示节点", () => {
   const page = readFileSync(new URL("../p.html", import.meta.url), "utf8");
   assert.doesNotMatch(page, /id="room-id"|房间编号/);
+});
+
+test("连接失败和关闭仅显示状态，背景重试 HTTP 失败保留牌桌、不弹框，三次后允许手动重连", async () => {
+  const { elements, sockets, timeouts, calls } = mount([roomResponse(),
+    { error: new TypeError("offline") }, { error: new TypeError("offline") }, { error: new TypeError("offline") }]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  sockets[0].receive({ type: "SNAPSHOT", payload: lobbySnapshot() });
+  sockets[0].onerror(); sockets[0].onclose({ code: 1006, reason: "" });
+  assert.equal(elements["error-dialog"].open, undefined);
+  assert.equal(elements["ws-status"].textContent, "重连中");
+  for (let i = 0; i < 3; i++) {
+    [...timeouts.values()].at(-1)(); await new Promise(setImmediate);
+    assert.equal(elements["room-panel"].hidden, false);
+    assert.equal(elements["error-dialog"].open, undefined);
+  }
+  assert.equal(calls.length, 4);
+  assert.equal(elements["ws-status"].textContent, "未连接");
+  assert.match(elements["table-notice"].textContent, /自动重连未成功/);
+});
+
+test("准备状态显示在头像边，已准备可取消，收到快照后才切换回准备按钮", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const snapshot = lobbySnapshot({ self: { userId: "u1", seatIndex: 1, roomState: "READY", allowedCommands: ["UNREADY", "STAND_UP"] },
+    roomMembers: [{ userId: "u1", seatIndex: 1, state: "READY", ready: true, nickname: "已准备玩家", stack: 200 }] });
+  sockets[0].receive({ type: "SNAPSHOT", payload: snapshot });
+  assert.ok(descendants(elements["table-seats"]).some((node) => node.className === "seat-readiness" && node.textContent === "已准备"));
+  assert.equal(elements["ready-player"].hidden, true);
+  assert.equal(elements["unready-player"].hidden, false);
+  elements["unready-player"].listeners.click();
+  assert.equal(sockets[0].sent.at(-1).type, "UNREADY"); assert.deepEqual(sockets[0].sent.at(-1).payload, {});
+  assert.equal(elements["unready-player"].disabled, true);
+  assert.ok(descendants(elements["table-seats"]).some((node) => node.className === "seat-readiness"));
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...snapshot, revision: 2,
+    self: { ...snapshot.self, roomState: "SEATED", allowedCommands: ["READY", "STAND_UP"] },
+    roomMembers: [{ ...snapshot.roomMembers[0], state: "SEATED", ready: false }] } });
+  assert.equal(elements["unready-player"].hidden, true);
+  assert.equal(elements["ready-player"].hidden, false);
+  assert.ok(!descendants(elements["table-seats"]).some((node) => node.className === "seat-readiness"));
+});
+
+test("旧后端未授权取消准备或带入筹码时入口提示暂不开放，不发送不支持的指令", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  sockets[0].receive({ type: "SNAPSHOT", payload: lobbySnapshot({ self: { userId: "u1", seatIndex: 1, roomState: "READY", allowedCommands: ["STAND_UP"] },
+    roomMembers: [{ userId: "u1", seatIndex: 1, state: "READY" }] }) });
+  assert.equal(elements["unready-player"].disabled, true);
+  assert.equal(elements["ready-detail"].hidden, false);
+  assert.equal(elements["submit-buy-in"].disabled, true);
+  elements["unready-player"].listeners.click(); elements["buy-in-form"].listeners.submit({ preventDefault() {} });
+  assert.ok(!sockets[0].sent.some((frame) => ["UNREADY", "BUY_IN"].includes(frame.type)));
+});
+
+const buyIn = { minAmount: 200, maxAmount: 2000, step: 200, options: [200, 400, 1000, 2000] };
+test("带入筹码在两局之间收到确认后更新余额，牌局中仅显示待到账，本局结束后用账本余额", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const first = lobbySnapshot({ self: { userId: "host", seatIndex: 0, allowedCommands: ["BUY_IN"] },
+    room: { ...lobbySnapshot().room, buyIn }, roomMembers: [{ userId: "host", nickname: "本人", seatIndex: 0, state: "SEATED", stack: 200 }] });
+  sockets[0].receive({ type: "SNAPSHOT", payload: first });
+  assert.equal(elements["submit-buy-in"].disabled, false);
+  elements["buy-in-amount"].value = "400";
+  elements["buy-in-form"].listeners.submit({ preventDefault() {} });
+  assert.equal(sockets[0].sent.at(-1).type, "BUY_IN"); assert.deepEqual(sockets[0].sent.at(-1).payload, { amount: 400 });
+  assert.match(elements["buy-in-balance"].textContent, /当前筹码 200/);
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: 2, roomMembers: [{ ...first.roomMembers[0], stack: 600 }] } });
+  assert.match(elements["buy-in-balance"].textContent, /当前筹码 600/);
+  const running = gameSnapshot({ revision: 3, room: { settings: { maxSeats: 6 }, buyIn },
+    self: { userId: "host", seatIndex: 0, roomState: "IN_HAND", allowedCommands: ["BUY_IN"] },
+    roomMembers: [{ ...first.roomMembers[0], stack: 200, state: "IN_HAND" }] });
+  sockets[0].receive({ type: "SNAPSHOT", payload: running });
+  elements["buy-in-amount"].value = "400"; elements["buy-in-form"].listeners.submit({ preventDefault() {} });
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...running, revision: 4,
+    roomMembers: [{ ...running.roomMembers[0], pendingBuyIn: 400 }] } });
+  assert.match(elements["buy-in-balance"].textContent, /当前筹码 200 · 待到账 \+400/);
+  assert.ok(descendants(elements["table-seats"]).some((node) => node.className === "seat-stack" && node.textContent === "200"));
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...running, revision: 5,
+    game: { ...running.game, phase: "complete" }, roomMembers: [{ ...running.roomMembers[0], stack: 600, pendingBuyIn: 0, state: "SEATED" }] } });
+  assert.match(elements["buy-in-balance"].textContent, /当前筹码 600/);
+  assert.ok(descendants(elements["table-seats"]).some((node) => node.className === "seat-stack" && node.textContent === "600"));
+});
+
+test("打开起身确认后状态变化不再允许起身，确认也不发送过时命令", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  sockets[0].receive({ type: "SNAPSHOT", payload: lobbySnapshot({ self: { userId: "u1", seatIndex: 1, allowedCommands: ["STAND_UP"] } }) });
+  const completion = elements["stand-up"].listeners.click();
+  sockets[0].receive({ type: "SNAPSHOT", payload: gameSnapshot({ revision: 2 }) });
+  elements["confirm-stand"].listeners.click(); await completion;
+  assert.ok(!sockets[0].sent.some((frame) => frame.type === "STAND_UP"));
 });

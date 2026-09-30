@@ -1,4 +1,4 @@
-import { createPokerTable } from "./poker-table.js?v=20260930-dialog-fullscreen";
+import { createPokerTable } from "./poker-table.js?v=20261001-compact-ready-buyin";
 import { POKER_API_BASE_URL } from "./poker-config.js";
 import { ticketFromLocation, ticketFragmentUrl, validateSettings, redactCredentials, normalizeWebSocketUrl } from "./poker-entry.js";
 
@@ -30,7 +30,7 @@ const table = createPokerTable({ document,
   onCommand: (type, payload) => { sendCommand(type, payload); toggleDrawer("room-details", "room-menu", false); },
   onError: (detail, awaitingReply = false) => showError(detail, awaitingReply
     ? { request: lastWsRequest, response: { error: detail, received: false } } : undefined),
-  confirmStand: () => window.confirm("确认起身并离开当前座位？起身后将以旁观身份观看牌局。"),
+  confirmStand: confirmStanding,
 });
 const debug = new URLSearchParams(window.location.search).get("debug") === "1";
 $("debug-panel").hidden = !debug;
@@ -168,7 +168,7 @@ function returnToLogin(detail = "请返回活动入口，登录后重新打开�
   message(""); setWsStatus("待验证");
   showPanel("login-panel");
 }
-async function enterRoom(autoConnect = true) {
+async function enterRoom(autoConnect = true, background = false) {
   let success = false;
   if (busy || !ticket) {
     if (!ticket) message("活动链接缺少 ticket，请从活动入口重新打开。", true);
@@ -176,7 +176,7 @@ async function enterRoom(autoConnect = true) {
   }
   setBusy(true);
   table.setConnected(false);
-  message("正在校验身份与活动资格…");
+  if (!background) message("正在校验身份与活动资格…");
   try {
     const data = await post("/api/poker/v1/entry", { ticket });
     applyView(data);
@@ -184,6 +184,12 @@ async function enterRoom(autoConnect = true) {
     success = true;
     return true;
   } catch (error) {
+    if (background && (!error.status || error.status >= 500)) {
+      setWsStatus("重连中");
+      text("ws-detail", "重新检查房间失败，正在尝试恢复连接。");
+      scheduleReconnect(socketEpoch);
+      return false;
+    }
     message(error.message, true, error.diagnostic);
     if (error.status === 401 || error.status === 403 || error.code === 401 || error.code === 403) {
       if (error.status === 401 || error.code === 401) returnToLogin(error.message);
@@ -351,9 +357,21 @@ function sendWsFrame(current, frame) {
 function sendCommand(type, payload) {
   if (!socket || socket.readyState !== WebSocket.OPEN || $("ws-status").textContent !== "已连接") {
     const detail = "连接已断开，请重新连接后操作。";
-    table.reject(detail); showError(detail, { request: { transport: "WebSocket", type, payload }, response: { sent: false, error: detail } }); return;
+    table.reject(detail); table.setConnected(false); return;
   }
   sendWsFrame(socket, { type, requestId: requestId(), payload });
+}
+function scheduleReconnect(epoch) {
+  clearTimeout(reconnectTimer);
+  if (reconnectAttempts >= 3) {
+    setWsStatus("未连接");
+    table.setConnected(false, "自动重连未成功，请在菜单中重新连接。");
+    return;
+  }
+  const attempt = ++reconnectAttempts;
+  setWsStatus("重连中");
+  table.setConnected(false, "连接暂不可用，正在自动重试（" + attempt + "/3）…");
+  reconnectTimer = setTimeout(() => { if (epoch === socketEpoch) enterRoom(true, true); }, [1500, 3000, 6000][attempt - 1]);
 }
 async function connectWebSocket() {
   if (busy || !connection?.url) return;
@@ -366,7 +384,6 @@ async function connectWebSocket() {
   if (!Number.isFinite(Date.parse(connection.expiresAt)) || Date.parse(connection.expiresAt) <= Date.now()) {
     setWsStatus("凭证已过期");
     text("ws-detail", "服务端返回的连接凭证已过期，请重新请求主入口。");
-    showError($("ws-detail").textContent, { request: "连接前检查", response: connection });
     return;
   }
   const attemptConnection = { ...connection };
@@ -379,7 +396,6 @@ async function connectWebSocket() {
   } catch {
     setWsStatus("连接地址无效");
     text("ws-detail", "请检查服务端返回的 WebSocket 地址；HTTPS 页面需要 wss:// 地址。");
-    showError($("ws-detail").textContent, { request: "连接前检查", response: attemptConnection });
     return;
   }
   wsRequests.clear();
@@ -395,14 +411,13 @@ async function connectWebSocket() {
   catch {
     setWsStatus("连接失败");
     text("ws-detail", "无法建立连接，请检查 WebSocket 地址。");
-    showError($("ws-detail").textContent, { request: lastWsRequest, response: { received: false } });
     return;
   }
   const current = socket;
   handshakeTimer = setTimeout(() => {
     if (epoch !== socketEpoch) return;
     failure = "连接或认证超时，请稍后重试。";
-    table.setConnected(false, failure); showError(failure, { request: lastWsRequest, response: { received: false, error: "AUTH_TIMEOUT" } }); current.close(4001, "AUTH_TIMEOUT");
+    table.setConnected(false, failure); current.close(4001, "AUTH_TIMEOUT");
   }, 15000);
   current.onopen = () => {
     if (epoch !== socketEpoch) return;
@@ -426,7 +441,7 @@ async function connectWebSocket() {
       handshakeTimer = setTimeout(() => {
         if (epoch !== socketEpoch) return;
         failure = "服务端尚未推送牌局状态，请稍后重试。";
-        table.setConnected(false, failure); showError(failure, { request: lastWsRequest, response: { received: false, error: "SNAPSHOT_TIMEOUT" } }); current.close(4001, "SNAPSHOT_TIMEOUT");
+        table.setConnected(false, failure); current.close(4001, "SNAPSHOT_TIMEOUT");
       }, 15000);
       setWsStatus("已连接");
       table.setConnected(false, "房间已连接，等待牌局同步…");
@@ -471,7 +486,6 @@ async function connectWebSocket() {
     table.setConnected(false, "连接失败，请打开房间菜单重新连接。");
     setWsStatus("连接失败");
     text("ws-detail", failure);
-    showError(failure, { request: lastWsRequest, response: { received: false, error: "WebSocket 连接错误；浏览器未提供响应正文" } });
   };
   current.onclose = (event) => {
     if (epoch !== socketEpoch) return;
@@ -482,44 +496,28 @@ async function connectWebSocket() {
     table.setConnected(false, "连接已断开，正在尝试恢复…");
     setWsStatus(failure ? "连接错误" : "已断开");
     text("ws-detail", [failure, "连接已关闭（" + event.code + "）", event.reason].filter(Boolean).join(" · "));
-    if (!failure && event.code !== 1000) showError($("ws-detail").textContent, { request: lastWsRequest,
-      response: { event: "CLOSE", code: event.code, reason: event.reason, wasClean: event.wasClean } });
-    if (event.code !== 1000 && event.code !== 4003 && reconnectAttempts < 3) {
-      const delay = [1500, 3000, 6000][reconnectAttempts++];
-      reconnectTimer = setTimeout(() => { if (epoch === socketEpoch) enterRoom(); }, delay);
-    } else table.setConnected(false, "连接已断开，请打开房间菜单重新连接。");
+    if (event.code !== 1000 && event.code !== 4003) scheduleReconnect(epoch);
+    else table.setConnected(false, "连接已断开，请打开房间菜单重新连接。");
   };
 }
 
 $("close-error").addEventListener("click", () => $("error-dialog").close());
 $("show-error").addEventListener("click", () => { if (!$("error-dialog").open) $("error-dialog").showModal(); });
-function fullscreenElement() { return document.fullscreenElement || document.webkitFullscreenElement; }
-function updateFullscreenButton() {
-  const active = Boolean(fullscreenElement());
-  text("fullscreen-button", active ? "取消全屏" : "全屏");
-  $("fullscreen-button").setAttribute("aria-pressed", String(active));
+let resolveStanding = null;
+function confirmStanding() {
+  return new Promise((resolve) => {
+    resolveStanding = resolve;
+    $("stand-dialog").returnValue = "";
+    $("stand-dialog").showModal();
+  });
 }
-$("fullscreen-button").addEventListener("click", async () => {
-  const root = document.documentElement;
-  const enter = root.requestFullscreen || root.webkitRequestFullscreen;
-  const exit = document.exitFullscreen || document.webkitExitFullscreen;
-  const active = Boolean(fullscreenElement());
-  const request = { operation: active ? "exitFullscreen" : "requestFullscreen", navigationUI: "hide" };
-  try {
-    if (active) {
-      if (!exit) throw new Error("当前浏览器无法退出网页全屏，请使用浏览器的退出全屏操作。");
-      await exit.call(document);
-    } else {
-      if (!enter) throw new Error("当前浏览器不支持网页全屏，无法通过此按钮隐藏地址栏。可以尝试浏览器的全屏功能，或添加到主屏幕后打开。");
-      await enter.call(root, { navigationUI: "hide" });
-    }
-  } catch (error) {
-    showError(error.message || "浏览器未允许全屏，请稍后重试。", { request, response: { error: error.message, name: error.name } });
-  } finally { updateFullscreenButton(); }
+$("cancel-stand").addEventListener("click", () => $("stand-dialog").close("cancel"));
+$("confirm-stand").addEventListener("click", () => $("stand-dialog").close("confirm"));
+$("stand-dialog").addEventListener("close", () => {
+  const resolve = resolveStanding; resolveStanding = null;
+  resolve?.($("stand-dialog").returnValue === "confirm");
 });
-document.addEventListener("fullscreenchange", updateFullscreenButton);
-document.addEventListener("webkitfullscreenchange", updateFullscreenButton);
-updateFullscreenButton();
+if (typeof ResizeObserver !== "undefined") new ResizeObserver(() => table.resize()).observe($("table-stage"));
 
 $("login-form").addEventListener("submit", (event) => {
   event.preventDefault();
@@ -539,14 +537,12 @@ $("create-form").addEventListener("change", (event) => {
 function toggleDrawer(id, button, open) { $(id).hidden = !open; $(button).setAttribute("aria-expanded", String(open)); }
 $("room-menu").addEventListener("click", () => toggleDrawer("room-details", "room-menu", $("room-details").hidden));
 $("close-details").addEventListener("click", () => toggleDrawer("room-details", "room-menu", false));
-$("help-button").addEventListener("click", () => toggleDrawer("help-panel", "help-button", $("help-panel").hidden));
-$("close-help").addEventListener("click", () => toggleDrawer("help-panel", "help-button", false));
-document.addEventListener("keydown", (event) => { if (event.key === "Escape") { toggleDrawer("room-details", "room-menu", false); toggleDrawer("help-panel", "help-button", false); } });
-$("refresh-room").addEventListener("click", enterRoom);
+document.addEventListener("keydown", (event) => { if (event.key === "Escape") toggleDrawer("room-details", "room-menu", false); });
+$("refresh-room").addEventListener("click", () => { reconnectAttempts = 0; return enterRoom(); });
 $("retry-login").addEventListener("click", enterRoom);
 $("refresh-entry").addEventListener("click", enterRoom);
 $("retry-entry").addEventListener("click", enterRoom);
-$("connect-ws").addEventListener("click", connectWebSocket);
+$("connect-ws").addEventListener("click", () => { reconnectAttempts = 0; return connectWebSocket(); });
 $("copy-ws-url").addEventListener("click", async () => {
   if (!connection?.url) return;
   try { await navigator.clipboard.writeText(normalizeWebSocketUrl(connection.url, apiBase)); message("WebSocket 链接已复制。"); }

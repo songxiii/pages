@@ -6,7 +6,7 @@
   <meta name="referrer" content="no-referrer">
   <meta name="theme-color" content="#0d111b">
   <title>活动牌局</title>
-  <link rel="stylesheet" href="./p.css?v=20260930-dialog-fullscreen">
+  <link rel="stylesheet" href="./p.css?v=20261001-compact-ready-buyin">
 </head>
 <body>
   <main class="page">
@@ -15,8 +15,6 @@
       <div class="page-head-spacer" aria-hidden="true"></div>
       <span id="ws-status" class="connection-status">验证中</span>
       <button id="show-error" class="icon-button error-history" type="button" aria-label="查看最近的错误" title="查看最近的错误" hidden>!</button>
-      <button id="help-button" class="icon-button" type="button" aria-label="玩法说明" aria-expanded="false" aria-controls="help-panel">?</button>
-      <button id="fullscreen-button" class="fullscreen-button secondary" type="button" aria-pressed="false">全屏</button>
     </header>
     <div id="message" class="message" role="status" aria-live="polite"></div>
 
@@ -70,20 +68,30 @@
       <section id="player-controls" class="menu-controls" hidden aria-labelledby="player-control-title">
         <h3 id="player-control-title">我的座位</h3>
         <button id="ready-player" class="menu-control secondary" type="button" hidden>准备</button>
+        <button id="unready-player" class="menu-control secondary" type="button" hidden>取消准备</button>
+        <p id="ready-detail" class="muted" role="status" hidden></p>
         <button id="stand-up" class="menu-control secondary" type="button">起身 <small>离开座位，转为旁观</small></button>
       </section>
-      <div class="summary-grid"><div><small>成员</small><strong id="room-member-count">0</strong></div><div><small>在线</small><strong id="online-count">0</strong></div><div><small>入座</small><strong id="seated-count">0</strong></div><div><small>你的状态</small><strong id="self-state">旁观中</strong></div></div><h3>房间配置</h3><dl id="room-settings" class="settings-list"></dl><h3>房间成员</h3><div id="members-list" class="members-list"></div>
-      <section id="connection-panel" hidden><h3>连接状态</h3><p id="ws-detail" class="muted" role="status"></p><button id="connect-ws" class="secondary" type="button">重新连接</button> <button id="refresh-room" class="secondary" type="button">重新检查房间</button></section>
-      <div class="versions"><span>页面版本 <time id="page-version" datetime="2026-09-30T23:13:20+08:00">2026-09-30 23:13:20</time></span><span>服务版本 <strong id="system-version">等待响应</strong></span></div>
+      <section id="buy-in-section" class="menu-controls" aria-labelledby="buy-in-title">
+        <h3 id="buy-in-title">带入筹码</h3><p id="buy-in-balance" class="muted"></p>
+        <form id="buy-in-form" class="buy-in-form"><label for="buy-in-amount">追加金额</label><div><select id="buy-in-amount" aria-label="带入筹码金额"></select><button id="submit-buy-in" class="secondary" type="submit">确认带入</button></div></form>
+        <p id="buy-in-detail" class="muted" role="status"></p>
+      </section>
+      <div class="summary-grid"><div><small>成员</small><strong id="room-member-count">0</strong></div><div><small>在线</small><strong id="online-count">0</strong></div><div><small>入座</small><strong id="seated-count">0</strong></div><div><small>你的状态</small><strong id="self-state">旁观中</strong></div></div><details class="menu-more"><summary>房间配置</summary><dl id="room-settings" class="settings-list"></dl></details><details class="menu-more"><summary>房间成员</summary><div id="members-list" class="members-list"></div></details>
+      <details id="connection-panel" class="menu-more" hidden><summary>连接状态</summary><p id="ws-detail" class="muted" role="status"></p><button id="connect-ws" class="secondary" type="button">重新连接</button> <button id="refresh-room" class="secondary" type="button">重新检查房间</button></details>
+      <div class="versions"><span>页面版本 <time id="page-version" datetime="2026-10-01T00:09:36+08:00">2026-10-01 00:09:36</time></span><span>服务版本 <strong id="system-version">等待响应</strong></span></div>
     </aside>
-    <aside id="help-panel" class="help-panel" hidden><div class="section-head"><h2>牌桌说明</h2><button id="close-help" class="icon-button" type="button" aria-label="关闭说明">×</button></div><p>每人两张底牌，配合五张公共牌组成最好的五张牌。当前玩家固定在牌桌正下方；金色 D 为庄家，蓝色 SB 为小盲，红色 BB 为大盲，亮起的头像表示当前行动玩家。</p><p>轮到你时，可弃牌、过牌或跟注，也可加注。加注金额表示本轮总下注，快捷加注按底池比例计算。点击虚线空座即可申请落座，落座后显示头像和昵称。至少两人落座后，房主可在左上角菜单开始游戏；暂停会在本局结束后生效。已落座玩家可在菜单选择起身，确认后转为旁观。</p></aside>
     <details id="debug-panel" class="debug-panel" hidden><summary>接口调试</summary><form id="login-form"><label for="access-token">联调 Access token</label><input id="access-token" type="password" autocomplete="off" placeholder="当前账号的 access token"><button class="secondary" type="submit">验证并进入</button></form><div class="versions"><span>协议 <strong id="protocol-version">—</strong></span><span>凭证有效至 <strong id="ws-expires">—</strong></span></div><div class="connection-url"><code id="ws-url"></code><button id="copy-ws-url" class="secondary" type="button">复制地址</button></div><h3 id="debug-endpoint">请求接口</h3><pre id="debug-request"></pre><h3>响应</h3><pre id="debug-response"></pre></details>
+    <dialog id="stand-dialog" class="confirm-dialog" aria-labelledby="stand-dialog-title" aria-describedby="stand-dialog-description">
+      <div class="confirm-orbit" aria-hidden="true">↗</div><h2 id="stand-dialog-title">确认起身？</h2><p id="stand-dialog-description">离开当前座位后，你将以旁观身份观看牌局。</p>
+      <div class="confirm-actions"><button id="cancel-stand" class="secondary" type="button" autofocus>继续落座</button><button id="confirm-stand" class="primary" type="button">确认起身</button></div>
+    </dialog>
     <dialog id="error-dialog" class="error-dialog" aria-labelledby="error-dialog-title" aria-describedby="error-dialog-message">
       <div class="section-head"><h2 id="error-dialog-title">操作遇到问题</h2><button id="close-error" class="icon-button" type="button" aria-label="关闭错误提示" autofocus>×</button></div>
       <p id="error-dialog-message" class="error-dialog-message"></p>
       <details id="error-diagnostics" class="error-diagnostics"><summary>查看错误详情</summary><p class="muted">请求与返回内容如下，登录凭证已隐藏。</p><h3>接口请求</h3><pre id="error-request"></pre><h3>接口返回</h3><pre id="error-response"></pre></details>
     </dialog>
   </main>
-  <script type="module" src="./src/p.js?v=20260930-dialog-fullscreen"></script>
+  <script type="module" src="./src/p.js?v=20261001-compact-ready-buyin"></script>
 </body>
 </html>
