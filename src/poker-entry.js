@@ -13,6 +13,28 @@ export function ticketFromLocation(location) {
   return query.get("ticket") || fragment.get("ticket") || "";
 }
 
+export function ticketFragmentUrl(location) {
+  const ticket = ticketFromLocation(location);
+  if (!ticket) return null;
+  const url = new URL(location.href);
+  if (!url.searchParams.has("ticket")) return null;
+  url.searchParams.delete("ticket");
+  url.hash = "ticket=" + encodeURIComponent(ticket);
+  return url.pathname + url.search + url.hash;
+}
+
+export function redactCredentials(value) {
+  if (Array.isArray(value)) return value.map(redactCredentials);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [
+      key,
+      /^(authorization|ticket|wstoken|accesstoken|refreshtoken)$/i.test(key)
+        ? "••••••（已隐藏）" : redactCredentials(item),
+    ]));
+  }
+  return value;
+}
+
 export function validateSettings(raw) {
   const settings = {};
   for (const key of Object.keys(DEFAULT_SETTINGS)) {

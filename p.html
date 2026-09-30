@@ -13,7 +13,7 @@
   <div class="page-shell">
     <header class="site-header">
       <a class="brand" href="./" aria-label="桌边首页"><span class="brand-mark">♠</span><span>桌边 <small>POKER CLUB</small></span></a>
-      <div class="header-right"><span class="header-tag">ACTIVITY TABLE · 01</span><span class="header-rule"></span><span id="header-user">专属活动入口</span></div>
+      <div class="header-right"><button class="header-inspector" id="jump-inspector" type="button">查看接口记录 ↘</button><span class="header-rule"></span><span id="header-user">专属活动入口</span></div>
     </header>
     <main>
       <section class="intro" aria-labelledby="page-title">
@@ -64,6 +64,17 @@
         </div>
         <div class="members-panel"><div class="members-heading"><div><span class="step">PLAYERS / 房间成员</span><h3>已进入的伙伴 <span id="member-total">0</span></h3></div><span>活动成员需亲自验证后才会显示在这里</span></div><div id="members-list" class="members-list"></div></div>
         <div class="availability"><span>◌</span><div><strong>牌局即将开放</strong><p>当前服务支持建房、进房与实时快照。入座、准备和下注尚未开放。</p></div></div>
+      </section>
+      <section class="inspector" id="api-inspector" aria-labelledby="inspector-title">
+        <div class="inspector-head">
+          <div><span class="step">NETWORK / 接口记录</span><h2 id="inspector-title">请求与响应</h2><p>按发生顺序展示本次页面的 HTTP 调用和 WebSocket 消息。</p></div>
+          <label class="reveal-control"><input id="reveal-secrets" type="checkbox"><span>显示完整凭证</span></label>
+        </div>
+        <p class="inspector-hint">Bearer token、ticket 和 wsToken 默认隐藏。显示完整凭证时，请勿分享截图或复制给他人。记录只保留在当前页面内存中。</p>
+        <div class="inspector-grid">
+          <div class="trace-section"><div class="trace-heading"><h3>HTTP 请求</h3><span id="http-total">0 条</span></div><div id="http-traces" class="trace-list"><p class="trace-empty">尚未发起请求。验证身份后，这里会显示请求体和完整响应。</p></div></div>
+          <div class="trace-section"><div class="trace-heading"><h3>WebSocket 消息</h3><span id="ws-total">0 条</span></div><div id="ws-traces" class="trace-list"><p class="trace-empty">建立实时连接后，这里会显示 AUTH、SNAPSHOT 等消息。</p></div></div>
+        </div>
       </section>
     </main>
     <footer><span>桌边 POKER CLUB</span><span>仅供娱乐与学习 · 虚拟筹码无现金价值</span></footer>

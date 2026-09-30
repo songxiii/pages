@@ -1,5 +1,5 @@
 import { POKER_API_BASE_URL } from "./poker-config.js";
-import { ticketFromLocation, validateSettings, responseData } from "./poker-entry.js";
+import { ticketFromLocation, ticketFragmentUrl, redactCredentials, validateSettings, responseData } from "./poker-entry.js";
 
 const $ = (id) => document.getElementById(id);
 const ticket = ticketFromLocation(window.location);
@@ -16,6 +16,101 @@ let pingTimer = null;
 let reconnectTimer = null;
 let reconnectAttempts = 0;
 let busy = false;
+const httpTraces = [];
+const wsTraces = [];
+let httpTotal = 0;
+let wsTotal = 0;
+
+function displayValue(value) {
+  return $("reveal-secrets").checked ? value : redactCredentials(value);
+}
+
+function pretty(value) {
+  return typeof value === "string" ? value : JSON.stringify(displayValue(value), null, 2);
+}
+
+function traceBlock(title, detail, value) {
+  const block = document.createElement("div");
+  block.className = "trace-block";
+  const label = document.createElement("div");
+  label.className = "trace-block-title";
+  const left = document.createElement("span");
+  left.textContent = title;
+  const right = document.createElement("span");
+  right.textContent = detail || "";
+  label.append(left, right);
+  const pre = document.createElement("pre");
+  pre.className = "trace-json" + (value == null ? " pending" : "");
+  pre.textContent = value == null ? "等待响应…" : pretty(value);
+  block.append(label, pre);
+  return block;
+}
+
+function renderInspector() {
+  text("http-total", httpTotal + " 条" + (httpTotal > httpTraces.length ? " · 显示最近 " + httpTraces.length + " 条" : ""));
+  text("ws-total", wsTotal + " 条" + (wsTotal > wsTraces.length ? " · 显示最近 " + wsTraces.length + " 条" : ""));
+  clearAndAppend("http-traces", httpTraces.length ? httpTraces.map((trace) => {
+    const card = document.createElement("article");
+    card.className = "trace-card";
+    const head = document.createElement("div");
+    head.className = "trace-card-head";
+    const badge = document.createElement("span");
+    badge.className = "trace-badge " + trace.state;
+    badge.textContent = trace.state === "pending" ? "请求中" : trace.state === "ok" ? "成功" : "失败";
+    const title = document.createElement("strong");
+    title.textContent = trace.method + " " + trace.path;
+    const timing = document.createElement("small");
+    timing.textContent = trace.time + (trace.duration == null ? "" : " · " + trace.duration + " ms");
+    head.append(badge, title, timing);
+    const body = document.createElement("div");
+    body.className = "trace-body";
+    body.append(
+      traceBlock("REQUEST / 请求", trace.url, { headers: trace.headers, body: trace.body }),
+      traceBlock("RESPONSE / 响应", trace.status == null ? "" : "HTTP " + trace.status, trace.response),
+    );
+    if (trace.error) body.append(traceBlock("ERROR / 错误", "", { message: trace.error }));
+    card.append(head, body);
+    return card;
+  }) : [emptyTrace("尚未发起请求。验证身份后，这里会显示请求体和完整响应。")]);
+  clearAndAppend("ws-traces", wsTraces.length ? wsTraces.map((trace) => {
+    const card = document.createElement("article");
+    card.className = "trace-card";
+    const head = document.createElement("div");
+    head.className = "trace-card-head";
+    const badge = document.createElement("span");
+    badge.className = "trace-badge " + (trace.direction === "收到" ? "ok" : "pending");
+    badge.textContent = trace.direction;
+    const title = document.createElement("strong");
+    title.textContent = trace.type;
+    const timing = document.createElement("small");
+    timing.textContent = trace.time;
+    head.append(badge, title, timing);
+    const body = document.createElement("div");
+    body.className = "trace-body";
+    body.append(traceBlock(trace.direction === "发送" ? "SEND / 发送" : "RECEIVE / 收到", "", trace.frame));
+    card.append(head, body);
+    return card;
+  }) : [emptyTrace("建立实时连接后，这里会显示 AUTH、SNAPSHOT 等消息。")]);
+}
+
+function emptyTrace(message) {
+  const element = document.createElement("p");
+  element.className = "trace-empty";
+  element.textContent = message;
+  return element;
+}
+
+function recordWs(direction, frame) {
+  wsTotal++;
+  wsTraces.unshift({
+    direction,
+    frame,
+    type: frame?.type || "未知消息",
+    time: new Date().toLocaleTimeString("zh-CN", { hour12: false }),
+  });
+  wsTraces.length = Math.min(wsTraces.length, 12);
+  renderInspector();
+}
 
 function showNotice(message, error = false) {
   const element = $("notice");
@@ -52,26 +147,59 @@ function stopSocket() {
 async function post(path, body) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
+  const started = performance.now();
+  const trace = {
+    method: "POST",
+    path,
+    url: apiBase + path,
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + accessToken },
+    body,
+    response: null,
+    status: null,
+    error: "",
+    state: "pending",
+    duration: null,
+    time: new Date().toLocaleTimeString("zh-CN", { hour12: false }),
+  };
+  httpTotal++;
+  httpTraces.unshift(trace);
+  httpTraces.length = Math.min(httpTraces.length, 8);
+  renderInspector();
   try {
-    const result = await fetch(apiBase + path, {
+    const result = await fetch(trace.url, {
       method: "POST",
       mode: "cors",
       credentials: "omit",
       cache: "no-store",
-      headers: { "Content-Type": "application/json", Authorization: "Bearer " + accessToken },
+      headers: trace.headers,
       body: JSON.stringify(body),
       signal: controller.signal,
     });
+    trace.status = result.status;
+    const raw = await result.text();
+    trace.response = {
+      status: result.status,
+      headers: Object.fromEntries(result.headers.entries()),
+      body: raw,
+    };
     let response;
-    try { response = await result.json(); }
+    try { response = JSON.parse(raw); }
     catch { throw new Error("服务返回了无法读取的内容，请稍后重试"); }
-    return responseData(response, result.status);
+    trace.response.body = response;
+    const data = responseData(response, result.status);
+    trace.state = "ok";
+    return data;
   } catch (error) {
-    if (error.name === "AbortError") throw new Error("请求超时，请检查网络后重试");
-    if (error instanceof TypeError) throw new Error("无法连接服务，请检查网络或页面来源是否已获跨域许可");
-    throw error;
+    let shown = error;
+    if (error.name === "AbortError") shown = new Error("请求超时，请检查网络后重试");
+    else if (error instanceof TypeError) shown = new Error("无法连接服务，请检查网络或页面来源是否已获跨域许可");
+    trace.state = "fail";
+    trace.error = shown.message;
+    throw shown;
   } finally {
     clearTimeout(timeout);
+    trace.duration = Math.round(performance.now() - started);
+    renderInspector();
   }
 }
 
@@ -170,26 +298,31 @@ function connect(connection) {
   const currentSocket = socket;
   currentSocket.onopen = () => {
     if (epoch !== socketEpoch) return;
-    currentSocket.send(JSON.stringify({
+    const frame = {
       type: "AUTH",
       requestId: requestId(),
       payload: { wsToken: connection.wsToken },
-    }));
+    };
+    recordWs("发送", frame);
+    currentSocket.send(JSON.stringify(frame));
   };
   currentSocket.onmessage = (event) => {
     if (epoch !== socketEpoch) return;
     let message;
     try { message = JSON.parse(event.data); } catch { return; }
+    recordWs("收到", message);
     if (message.type === "AUTH_OK") {
       reconnectAttempts = 0;
       setConnection("实时连接已建立", "connected");
       pingTimer = setInterval(() => {
         if (currentSocket.readyState === WebSocket.OPEN) {
-          currentSocket.send(JSON.stringify({
+          const frame = {
             type: "PING",
             requestId: requestId(),
             payload: { clientTime: new Date().toISOString() },
-          }));
+          };
+          recordWs("发送", frame);
+          currentSocket.send(JSON.stringify(frame));
         }
       }, 20000);
     } else if (message.type === "SNAPSHOT" && message.payload) {
@@ -203,10 +336,14 @@ function connect(connection) {
     }
   };
   currentSocket.onerror = () => {
-    if (epoch === socketEpoch) setConnection("连接中断", "disconnected");
+    if (epoch === socketEpoch) {
+      recordWs("收到", { type: "SOCKET_ERROR", payload: { message: "浏览器报告实时连接错误" } });
+      setConnection("连接中断", "disconnected");
+    }
   };
-  currentSocket.onclose = () => {
+  currentSocket.onclose = (event) => {
     if (epoch !== socketEpoch) return;
+    recordWs("收到", { type: "SOCKET_CLOSED", payload: { code: event.code, reason: event.reason || "", clean: event.wasClean } });
     clearInterval(pingTimer);
     pingTimer = null;
     socket = null;
@@ -399,9 +536,12 @@ $("toggle-token").addEventListener("click", () => {
   $("toggle-token").textContent = visible ? "显示" : "隐藏";
   $("toggle-token").setAttribute("aria-label", visible ? "显示令牌" : "隐藏令牌");
 });
+$("reveal-secrets").addEventListener("change", renderInspector);
+$("jump-inspector").addEventListener("click", () => $("api-inspector").scrollIntoView({ behavior: "smooth", block: "start" }));
 if (ticket) {
-  // Keep the identity-bound ticket in memory; clear it from browser history and referrers.
-  history.replaceState(null, "", window.location.pathname);
+  // Keep refreshable links in the fragment. Convert legacy query links to a fragment.
+  const fragmentUrl = ticketFragmentUrl(window.location);
+  if (fragmentUrl) history.replaceState(null, "", fragmentUrl);
 } else {
   showNotice("活动链接缺少 ticket，请从活动入口重新打开。", true);
   $("enter-button").disabled = true;

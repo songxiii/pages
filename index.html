@@ -46,11 +46,10 @@
       }
 
       var ticket = readTicket(window.location.search.slice(1));
-      var inQuery = ticket !== null;
-      if (!inQuery) ticket = readTicket(window.location.hash.slice(1));
+      if (ticket === null) ticket = readTicket(window.location.hash.slice(1));
 
       if (ticket !== null) {
-        window.location.replace("./p.html" + (inQuery ? "?" : "#") + "ticket=" + encodeURIComponent(ticket));
+        window.location.replace("./p.html#ticket=" + encodeURIComponent(ticket));
         return;
       }
 
