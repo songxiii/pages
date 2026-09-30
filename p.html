@@ -5,41 +5,72 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="referrer" content="no-referrer">
   <meta name="theme-color" content="#111b17">
-  <title>扑克接口请求</title>
+  <title>活动扑克房间</title>
   <link rel="stylesheet" href="./p.css">
 </head>
 <body>
   <main class="page">
-    <div class="version">页面版本 <time id="page-version" datetime="2026-09-30T11:22:22+08:00">2026-09-30 11:22:22</time></div>
+    <header class="page-head">
+      <div><span class="overline">ACTIVITY POKER</span><h1>活动扑克房间</h1></div>
+      <div class="versions"><span>页面版本 <time id="page-version" datetime="2026-09-30T15:37:53+08:00">2026-09-30 15:37:53</time></span><span>服务版本 <strong id="system-version">等待响应</strong></span></div>
+    </header>
 
-    <section class="panel" aria-labelledby="endpoint-title">
-      <h1 id="endpoint-title">请求接口</h1>
-      <div class="endpoint-row">
-        <label for="endpoint">接口</label>
-        <select id="endpoint">
-          <option value="/api/poker/v1/entry">POST /api/poker/v1/entry</option>
-          <option value="/api/poker/v1/rooms">POST /api/poker/v1/rooms</option>
-        </select>
-      </div>
-      <code id="endpoint-url" class="endpoint-url"></code>
+    <div id="message" class="message" role="status" aria-live="polite"></div>
+
+    <section id="login-panel" class="panel" hidden aria-labelledby="login-title">
+      <span class="overline">IDENTITY</span><h2 id="login-title">验证当前账号</h2>
+      <p>主入口要求与活动链接本人一致的 Bearer access token。</p>
+      <form id="login-form"><label for="access-token">Access token</label><input id="access-token" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="粘贴当前账号的 access token"><button type="submit">验证并进入</button></form>
     </section>
 
-    <section class="panel" aria-labelledby="request-title">
-      <h2 id="request-title">请求内容</h2>
-      <label class="field" for="access-token">Bearer access token
-        <input id="access-token" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="粘贴 access token">
-      </label>
-      <label class="field" for="request-body">JSON 请求体
-        <textarea id="request-body" spellcheck="false" rows="7"></textarea>
-      </label>
-      <pre id="request-preview" class="json-view" aria-label="实际发送的请求"></pre>
-      <div class="request-actions"><button id="send-request" type="button">发送请求</button><span id="request-error" role="alert"></span></div>
+    <section id="activity-panel" class="panel" hidden aria-labelledby="activity-title">
+      <div class="section-head"><div><span class="overline">ACTIVITY</span><h2 id="activity-title">活动</h2><span id="activity-id" class="muted"></span></div><span id="activity-status" class="pill">—</span></div>
+      <div class="summary-grid"><div><small>当前用户</small><strong id="self-name">—</strong></div><div><small>活动身份</small><strong id="self-role">—</strong></div><div><small>活动成员</small><strong id="activity-count">—</strong></div></div>
     </section>
 
-    <section class="panel" aria-labelledby="response-title">
-      <div class="response-heading"><h2 id="response-title">返回内容</h2><span id="response-status">尚未请求</span></div>
-      <pre id="response-body" class="json-view" aria-live="polite">尚未发送请求</pre>
+    <section id="waiting-panel" class="panel state-panel" hidden aria-labelledby="waiting-title">
+      <span class="state-icon">◷</span><span class="overline">WAITING</span><h2 id="waiting-title">房间尚未创建</h2>
+      <p>请联系活动创建人创建房间。创建完成后，点击下方按钮重新检查。</p>
+      <button id="refresh-entry" type="button" class="secondary">刷新房间状态</button>
     </section>
+
+    <section id="create-panel" class="panel" hidden aria-labelledby="create-title">
+      <span class="overline">CREATOR / CREATE ROOM</span><h2 id="create-title">创建活动房间</h2>
+      <p>你是活动创建人。房间配置在创建后固定，创建成功会自动加入并处于旁观状态。</p>
+      <form id="create-form">
+        <div class="settings-grid">
+          <label>座位上限<input name="maxSeats" type="number" min="2" max="9" step="1" value="6" required></label>
+          <label>落座方式<select name="seatingType"><option value="0">随机落座</option><option value="1">自主选座</option></select></label>
+          <label>小盲注<input name="smallBlind" type="number" min="1" step="1" value="10" required></label>
+          <label>大盲注<input name="bigBlind" type="number" min="1" step="1" value="20" required></label>
+          <label>初始筹码<input name="startingStack" type="number" min="20" step="1" value="1000" required></label>
+          <label>行动时限（秒）<input name="turnSeconds" type="number" min="10" max="120" step="1" value="30" required></label>
+        </div>
+        <div class="actions"><button id="create-room" type="submit">创建并进入房间</button><span id="settings-error" role="alert"></span></div>
+      </form>
+    </section>
+
+    <section id="closed-panel" class="panel state-panel" hidden><span class="state-icon">♠</span><h2>房间已关闭</h2><p>本场活动房间已结束。</p></section>
+    <section id="error-panel" class="panel state-panel" hidden><span class="state-icon">!</span><h2>暂时无法进入</h2><p id="error-detail">请稍后重试。</p><button id="retry-entry" type="button" class="secondary">重新请求主入口</button></section>
+
+    <section id="room-panel" class="panel" hidden aria-labelledby="room-title">
+      <div class="section-head"><div><span class="overline">ROOM READY</span><h2 id="room-title">活动房间</h2><span id="room-id" class="muted"></span></div><span id="room-status" class="pill">—</span></div>
+      <div class="summary-grid room-summary"><div><small>房间成员</small><strong id="room-member-count">0</strong></div><div><small>在线</small><strong id="online-count">0</strong></div><div><small>已入座</small><strong id="seated-count">0</strong></div><div><small>你的状态</small><strong id="self-state">旁观中</strong></div></div>
+      <h3>房间配置</h3><dl id="room-settings" class="settings-list"></dl>
+      <h3>房间成员</h3><div id="members-list" class="members-list"></div>
+    </section>
+
+    <section id="connection-panel" class="panel" hidden aria-labelledby="connection-title">
+      <div class="section-head"><div><span class="overline">REALTIME</span><h2 id="connection-title">WebSocket 连接</h2></div><span id="ws-status" class="pill">未连接</span></div>
+      <div class="connection-url"><code id="ws-url"></code><button id="copy-ws-url" type="button" class="secondary">复制链接</button></div>
+      <div class="connection-info"><span>协议版本 <strong id="protocol-version">—</strong></span><span>连接凭证有效至 <strong id="ws-expires">—</strong></span></div>
+      <button id="connect-ws" type="button">连接 WebSocket</button>
+    </section>
+
+    <details id="debug-panel" class="panel debug-panel">
+      <summary>接口请求与响应</summary>
+      <div class="debug-grid"><div><h3 id="debug-endpoint">请求接口</h3><pre id="debug-request">尚未请求</pre></div><div><h3 id="debug-response-title">返回内容</h3><pre id="debug-response">尚未返回</pre></div></div>
+    </details>
   </main>
   <script type="module" src="./src/p.js"></script>
 </body>

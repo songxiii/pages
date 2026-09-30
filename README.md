@@ -27,6 +27,6 @@ GitHub 项目调研见 [docs/RESEARCH.md](docs/RESEARCH.md)。
 
 ## 活动专属入口
 
-`p.html#ticket=...` 是这两个 Java 接口的简洁调试页：选择 `POST /api/poker/v1/entry` 或 `POST /api/poker/v1/rooms`，填写 Bearer access token、编辑 JSON 请求体，然后查看实际请求和完整 HTTP 返回。页面只显示接口、请求、响应和静态修改时间版本号；不连接 WebSocket，也不展示牌桌。ticket 保留在 URL fragment 中，刷新后会重新填入请求体；旧的 `?ticket=...` 链接会转成 fragment。
+`p.html#ticket=...` 打开后立即调用 `POST /api/poker/v1/entry`。若当前标签页已有 access token，会自动用于身份验证；否则接口返回 401 后提示输入与 ticket 本人一致的 Bearer token。输入的 token 仅缓存在当前标签页的 `sessionStorage` 中，刷新后可再次自动验证。普通成员在房间未创建时看到联系创建人的提示，活动创建人可以选择固定配置并调用 `POST /api/poker/v1/rooms` 建房。已有房间时页面显示房间信息、成员与 `connection.url`，并可用返回的短期 `wsToken` 手动建立 WebSocket 连接。页面顶部显示静态页面版本以及 HTTP/WS 响应顶层的 `systemVersion`；调试区展示脱敏的最近一次请求和响应。ticket 保留在 URL fragment 中，旧的 `?ticket=...` 链接会转成 fragment。
 
 API 域名配置在 [src/poker-config.js](src/poker-config.js)。如果页面与 Java 服务不同源，服务端需要把页面的精确 HTTPS Origin 配置到 `POKER_ALLOWED_ORIGINS`，并设置 `POKER_WS_PUBLIC_URL`。小程序或宿主应用需把 ticket 放在 URL fragment 中；access token 不应放进 URL。
