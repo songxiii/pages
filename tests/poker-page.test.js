@@ -16,6 +16,8 @@ function element() {
     classList: { toggle() {} },
     setAttribute(name, value) { this.attributes[name] = value; },
     remove() { this.removed = true; },
+    showModal() { this.open = true; },
+    close() { this.open = false; },
     addEventListener(type, handler) { this.listeners[type] = handler; },
     querySelector() { return this.submitButton ||= element(); },
     replaceChildren(...items) { this.children = items; },
@@ -33,6 +35,7 @@ function mount(responses, initialToken = "", options = {}) {
   const confirmations = [];
   const confirmResults = [...(options.confirmResults || [])];
   const intervals = new Map();
+  const timeouts = new Map();
   let timerId = 0;
   class FakeWebSocket {
     static OPEN = 1;
@@ -47,13 +50,29 @@ function mount(responses, initialToken = "", options = {}) {
     constructor(form) { this.entries = Object.entries(form.fields || {}); }
     [Symbol.iterator]() { return this.entries[Symbol.iterator](); }
   }
+  const document = { body: element(), documentElement: element(), listeners: {},
+    addEventListener(type, handler) { this.listeners[type] = handler; },
+    getElementById(id) { return elements[id]; }, createElement: element };
+  const fullscreenCalls = [];
+  if (options.fullscreen) {
+    document.documentElement.requestFullscreen = async (settings) => {
+      fullscreenCalls.push(settings);
+      if (options.fullscreenError) throw options.fullscreenError;
+      document.fullscreenElement = document.documentElement;
+      document.listeners.fullscreenchange();
+    };
+    document.exitFullscreen = async () => {
+      document.fullscreenElement = null;
+      document.listeners.fullscreenchange();
+    };
+  }
   runInNewContext(script, {
     POKER_API_BASE_URL: options.apiBase || "https://api.example.com",
     ticketFromLocation, ticketFragmentUrl, validateSettings, redactCredentials, normalizeWebSocketUrl,
     window: { confirm(value) { confirmations.push(value); return confirmResults.shift() ?? false; }, location: { href: "https://example.com/p.html#ticket=v1.k1.test", protocol: "https:", search: "", hash: "#ticket=v1.k1.test" } },
     WebSocket: FakeWebSocket, crypto: webcrypto,
     navigator: { clipboard: { async writeText(value) { copied.push(value); } } },
-    document: { body: element(), addEventListener() {}, getElementById(id) { return elements[id]; }, createElement: element },
+    document,
     history: { replaceState() {} },
     sessionStorage: {
       getItem(key) { return storage.get(key) || null; },
@@ -67,14 +86,15 @@ function mount(responses, initialToken = "", options = {}) {
       assert.ok(next, "unexpected HTTP request");
       if (next.error) throw next.error;
       return { status: next.status, ok: next.status >= 200 && next.status < 300,
-        text: async () => JSON.stringify(next.body) };
+        text: async () => next.raw ?? JSON.stringify(next.body) };
     },
     AbortController, URL, URLSearchParams, Date, JSON,
-    setTimeout: () => 1, clearTimeout() {},
+    setTimeout(fn) { const id = ++timerId; timeouts.set(id, fn); return id; },
+    clearTimeout(id) { timeouts.delete(id); },
     setInterval(fn) { const id = ++timerId; intervals.set(id, fn); return id; },
     clearInterval(id) { intervals.delete(id); },
   });
-  return { elements, calls, storage, sockets, copied, intervals, confirmations };
+  return { elements, calls, storage, sockets, copied, intervals, timeouts, confirmations, document, fullscreenCalls };
 }
 
 const version = "20260930112134";
@@ -537,4 +557,108 @@ test("连接未就绪及当前牌局不允许落座时，点击空座始终显�
   elements["table-seats"].children.find((seat) => seat.className.includes(" empty")).listeners.click();
   assert.match(elements["table-notice"].textContent, /等本局结束/);
   assert.equal(sockets[0].sent.filter((frame) => frame.type === "SIT_DOWN").length, 0);
+});
+
+test("HTTP 异常弹框显示对应请求及返回，隐藏凭证，关闭后可重新查看且后续请求不会覆盖详情", async () => {
+  const { elements } = mount([
+    { status: 403, body: { code: 403, message: "无活动权限", error: "BusinessException", wsToken: "returned-secret" } },
+    { status: 200, body: { code: 0, data: { entryState: "WAITING_FOR_CREATOR", activity, self, counts } } },
+  ], "access-secret");
+  await new Promise(setImmediate);
+  assert.equal(elements["error-dialog"].open, true);
+  assert.equal(elements["error-dialog-message"].textContent, "无活动权限");
+  assert.equal(elements["error-diagnostics"].open, false);
+  assert.match(elements["error-request"].textContent, /POST.*|api\/poker\/v1\/entry/);
+  assert.match(elements["error-request"].textContent, /已隐藏/);
+  assert.doesNotMatch(elements["error-request"].textContent, /v1.k1.test|access-secret/);
+  assert.match(elements["error-response"].textContent, /403.*|BusinessException/);
+  assert.doesNotMatch(elements["error-response"].textContent, /returned-secret/);
+  const original = elements["error-response"].textContent;
+  elements["close-error"].listeners.click();
+  assert.equal(elements["error-dialog"].open, false);
+  assert.equal(elements["show-error"].hidden, false);
+  await elements["retry-entry"].listeners.click();
+  elements["show-error"].listeners.click();
+  assert.equal(elements["error-dialog"].open, true);
+  assert.equal(elements["error-response"].textContent, original);
+});
+
+test("非 JSON 响应及无响应的网络错误仍提供真实诊断信息", async () => {
+  for (const response of [
+    { status: 502, raw: "<html>upstream unavailable</html>" },
+    { error: new TypeError("Failed to fetch") },
+    { error: Object.assign(new Error("aborted"), { name: "AbortError" }) },
+  ]) {
+    const { elements } = mount([response]);
+    await new Promise(setImmediate);
+    assert.equal(elements["error-dialog"].open, true);
+    assert.match(elements["error-request"].textContent, /api\/poker\/v1\/entry/);
+    if (response.raw) assert.match(elements["error-response"].textContent, /502.*|upstream unavailable/);
+    else assert.match(elements["error-response"].textContent, /"received": false/);
+    if (response.error?.name === "AbortError") assert.match(elements["error-dialog-message"].textContent, /超时/);
+  }
+});
+
+test("WebSocket 错误按 requestId 展示对应操作，不被后来的其他请求覆盖", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const snapshot = lobbySnapshot();
+  sockets[0].receive({ type: "SNAPSHOT", payload: snapshot });
+  elements["table-seats"].children.find((seat) => seat.className.includes(" empty")).listeners.click();
+  const sit = sockets[0].sent.at(-1);
+  sockets[0].receive({ type: "ERROR", requestId: sit.requestId, payload: { message: "落座失败", code: "SEAT_TAKEN", detail: { currentSeat: 1 } } });
+  assert.equal(elements["error-dialog"].open, true);
+  assert.match(elements["error-request"].textContent, /SIT_DOWN/);
+  assert.match(elements["error-response"].textContent, /SEAT_TAKEN/);
+  elements["close-error"].listeners.click();
+  sockets[0].receive({ type: "AUTH_EXPIRED", requestId: sockets[0].sent[0].requestId, payload: { message: "认证失效" } });
+  assert.match(elements["error-request"].textContent, /AUTH/);
+  assert.doesNotMatch(elements["error-request"].textContent, /SIT_DOWN|secret/);
+  assert.match(elements["error-request"].textContent, /已隐藏/);
+});
+
+test("操作超时弹框包含已发送的操作与未收到响应说明", async () => {
+  const { elements, sockets, timeouts } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  sockets[0].receive({ type: "SNAPSHOT", payload: lobbySnapshot() });
+  elements["table-seats"].children.find((seat) => seat.className.includes(" empty")).listeners.click();
+  [...timeouts.values()].at(-1)();
+  assert.equal(elements["error-dialog"].open, true);
+  assert.match(elements["error-dialog-message"].textContent, /尚未确认/);
+  assert.match(elements["error-request"].textContent, /SIT_DOWN/);
+  assert.match(elements["error-response"].textContent, /"received": false/);
+});
+
+test("全屏按钮请求隐藏浏览器导航，进入和外部退出全屏时同步文字，点击可取消全屏", async () => {
+  const { elements, document, fullscreenCalls } = mount([roomResponse()], "", { fullscreen: true });
+  await new Promise(setImmediate);
+  assert.equal(elements["fullscreen-button"].textContent, "全屏");
+  await elements["fullscreen-button"].listeners.click();
+  assert.equal(fullscreenCalls[0].navigationUI, "hide");
+  assert.equal(elements["fullscreen-button"].textContent, "取消全屏");
+  assert.equal(elements["fullscreen-button"].attributes["aria-pressed"], "true");
+  document.fullscreenElement = null;
+  document.listeners.fullscreenchange();
+  assert.equal(elements["fullscreen-button"].textContent, "全屏");
+  await elements["fullscreen-button"].listeners.click();
+  await elements["fullscreen-button"].listeners.click();
+  assert.equal(document.fullscreenElement, null);
+  assert.equal(elements["fullscreen-button"].textContent, "全屏");
+});
+
+test("浏览器不支持或拒绝全屏时弹框解释原因，不误显示取消全屏", async () => {
+  for (const options of [{}, { fullscreen: true, fullscreenError: new TypeError("Permission denied") }]) {
+    const { elements } = mount([roomResponse()], "", options);
+    await new Promise(setImmediate);
+    await elements["fullscreen-button"].listeners.click();
+    assert.equal(elements["error-dialog"].open, true);
+    assert.match(elements["error-dialog-message"].textContent, /不支持网页全屏|Permission denied/);
+    assert.match(elements["error-request"].textContent, /requestFullscreen/);
+    assert.equal(elements["fullscreen-button"].textContent, "全屏");
+  }
+});
+
+test("房间菜单不包含房间 ID 展示节点", () => {
+  const page = readFileSync(new URL("../p.html", import.meta.url), "utf8");
+  assert.doesNotMatch(page, /id="room-id"|房间编号/);
 });

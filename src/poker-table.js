@@ -87,7 +87,7 @@ function safeAvatar(url) {
   try { const parsed = new URL(url); return ["https:", "http:"].includes(parsed.protocol) ? parsed.href : null; }
   catch { return null; }
 }
-export function createPokerTable({ document, onAction, onCommand, confirmStand = () => false }) {
+export function createPokerTable({ document, onAction, onCommand, onError = () => {}, confirmStand = () => false }) {
   const $ = (id) => document.getElementById(id);
   let view = {}, game = null, connected = false, pending = false, pendingTimer = null;
   let lastHand = null, lastBoard = [], timer = null, deadline = null, currentTimer = null, currentSeconds = null;
@@ -98,6 +98,10 @@ export function createPokerTable({ document, onAction, onCommand, confirmStand =
     if (value != null) el.textContent = String(value);
     return el;
   };
+  function reportError(detail, awaitingReply = false) {
+    $("table-notice").textContent = detail;
+    onError(detail, awaitingReply);
+  }
   function card(value, reveal = false, delay = 0) {
     const match = typeof value === "string" && value.match(/^([2-9TJQKA])([shdc])$/i);
     const el = node("span", "card" + (!match ? " back" : /[hd]/i.test(match[2]) ? " red" : "") + (reveal ? " revealing" : ""));
@@ -118,7 +122,7 @@ export function createPokerTable({ document, onAction, onCommand, confirmStand =
     pending = true; updateActions();
     $("table-notice").textContent = "正在提交操作…";
     $("raise-editor").hidden = true; $("raise-toggle").setAttribute("aria-expanded", "false");
-    pendingTimer = setTimeout(() => { pending = false; updateActions(); $("table-notice").textContent = "操作尚未确认，请重新连接以同步牌局。"; connected = false; updateActions(); }, 10000);
+    pendingTimer = setTimeout(() => { pending = false; connected = false; updateActions(); reportError("操作尚未确认，请重新连接以同步牌局。", true); }, 10000);
     onAction(action, amount);
   }
   function canAct() {
@@ -168,20 +172,20 @@ export function createPokerTable({ document, onAction, onCommand, confirmStand =
     $("play-state-notice").textContent = controls.paused ? "游戏已暂停 · 等待房主继续" : "房主已申请暂停 · 本局结束后生效";
   }
   function command(type, payload = {}) {
-    if (pending) { $("table-notice").textContent = "正在处理上一项操作，请稍候…"; return; }
-    if (!connected) { $("table-notice").textContent = "牌桌连接尚未就绪，请稍候或在菜单中重新连接。"; return; }
+    if (pending) { reportError("正在处理上一项操作，请稍候…"); return; }
+    if (!connected) { reportError("牌桌连接尚未就绪，请稍候或在菜单中重新连接。"); return; }
     const controls = roomControls(view);
     const permission = { SIT_DOWN: controls.canSit && openSeats.has(payload.seatIndex), READY: controls.canReady,
       STAND_UP: controls.canStand, START_HAND: controls.canStart, PAUSE_GAME: controls.canPause, RESUME_GAME: controls.canResume };
     if (!permission[type]) {
-      if (type === "SIT_DOWN") $("table-notice").textContent = controls.seated ? "你已落座，请先在菜单中确认起身。"
+      if (type === "SIT_DOWN") reportError(controls.seated ? "你已落座，请先在菜单中确认起身。"
         : !openSeats.has(payload.seatIndex) ? "该座位已有人入座，请选择其他空座。"
-        : controls.inHand ? "本局正在进行，请等本局结束后落座。" : "房间暂不允许落座，请稍后重新检查房间。";
+        : controls.inHand ? "本局正在进行，请等本局结束后落座。" : "房间暂不允许落座，请稍后重新检查房间。");
       return;
     }
     pending = true; updateActions();
     $("table-notice").textContent = type === "SIT_DOWN" ? (Number(view.room?.settings?.seatingType) === 0 ? "正在随机落座…" : "正在落座…") : type === "PAUSE_GAME" ? "正在申请本局结束后暂停…" : "正在提交操作…";
-    pendingTimer = setTimeout(() => { pending = false; connected = false; updateActions(); $("table-notice").textContent = "操作尚未确认，请重新连接以同步房间。"; }, 10000);
+    pendingTimer = setTimeout(() => { pending = false; connected = false; updateActions(); reportError("操作尚未确认，请重新连接以同步房间。", true); }, 10000);
     // Current Java rejects extra lifecycle fields. Revision belongs to ACTION only.
     const commandPayload = type === "SIT_DOWN" && Number(view.room?.settings?.seatingType) === 0 ? {} : payload;
     onCommand(type, commandPayload);
