@@ -12,16 +12,6 @@ const SEAT_LAYOUTS = {
   8: [[50, 89], [11, 73], [11, 48], [25, 23], [50, 13], [75, 23], [89, 48], [89, 73]],
   9: [[50, 89], [11, 74], [11, 53], [11, 32], [34, 13], [66, 13], [89, 32], [89, 53], [89, 74]],
 };
-const WIDE_SEAT_LAYOUTS = {
-  2: [[50, 88], [50, 15]],
-  3: [[50, 88], [18, 25], [82, 25]],
-  4: [[50, 88], [10, 50], [50, 13], [90, 50]],
-  5: [[50, 88], [12, 65], [30, 20], [70, 20], [88, 65]],
-  6: [[50, 88], [13, 67], [13, 28], [50, 13], [87, 28], [87, 67]],
-  7: [[50, 88], [20, 76], [10, 38], [35, 13], [65, 13], [90, 38], [80, 76]],
-  8: [[50, 88], [20, 76], [9, 43], [30, 15], [50, 12], [70, 15], [91, 43], [80, 76]],
-  9: [[50, 88], [25, 78], [9, 54], [9, 26], [34, 13], [66, 13], [91, 26], [91, 54], [75, 78]],
-};
 export const formatChips = (value) => Number.isFinite(Number(value)) ? Number(value).toLocaleString("zh-CN", { maximumFractionDigits: 2 }) : "—";
 const identity = (member) => member?.userId ?? member?.id;
 export function seatIndex(player) {
@@ -40,11 +30,10 @@ export function ownSeat(view) {
   const seat = seatIndex(member);
   return seat === null ? null : Number(seat);
 }
-export function tableLayout(count, selfSeat = null, wide = false) {
+export function tableLayout(count, selfSeat = null) {
   const size = Math.min(9, Math.max(2, Math.floor(Number(count)) || 6));
   const anchor = Number.isInteger(selfSeat) && selfSeat >= 0 && selfSeat < size ? selfSeat : 0;
-  // A wide screen spreads seats around a horizontal ellipse instead of stacking sides.
-  return (wide ? WIDE_SEAT_LAYOUTS : SEAT_LAYOUTS)[size].map(([x, y], index) => ({ seatIndex: (index + anchor) % size, x, y }));
+  return SEAT_LAYOUTS[size].map(([x, y], index) => ({ seatIndex: (index + anchor) % size, x, y }));
 }
 export function playerReady(view, member) {
   if (view.game && view.game.phase !== "complete") return false;
@@ -126,13 +115,11 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
   let seatButtons = [], openSeats = new Set();
   let standConfirmOpen = false;
   function currentLayout() {
-    const stage = $("table-stage");
-    return tableLayout(view.room?.settings?.maxSeats || Math.max(2, ...(game?.players || []).map((p) => p.seatIndex + 1)), ownSeat(view), stage.clientWidth > stage.clientHeight * 1.2);
+    return tableLayout(view.room?.settings?.maxSeats || Math.max(2, ...(game?.players || []).map((p) => p.seatIndex + 1)), ownSeat(view));
   }
   function resize() {
-    const stage = $("table-stage"), wide = stage.clientWidth > stage.clientHeight * 1.2;
-    stage.setAttribute("data-wide", String(wide));
-    stage.style.setProperty("--seat-size", Math.min(76, stage.clientWidth * .15, stage.clientHeight * (wide ? .11 : .115)) + "px");
+    const stage = $("table-stage");
+    stage.style.setProperty("--seat-size", Math.min(76, stage.clientWidth * .15, stage.clientHeight * .115) + "px");
     const layout = currentLayout();
     for (const el of $("table-seats").children) {
       const place = layout.find((p) => String(p.seatIndex) === el.getAttribute("data-seat-index"));
@@ -177,6 +164,14 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     const seat = ownSeat(view);
     return connected && !pending && !roomControls(view).paused && game?.legal && seat !== null && seat === game.turn && game.phase !== "complete";
   }
+  function chooseRaise(amount) {
+    if (!canAct() || !game.legal.canRaise) return;
+    const input = $("raise-range");
+    input.min = game.legal.minRaiseTo; input.max = game.legal.maxRaiseTo; input.step = game.legal.chipUnit || 1;
+    input.value = amount;
+    $("raise-value").textContent = formatChips(amount);
+    for (const button of $("raise-presets").children) button.setAttribute("aria-pressed", String(Number(button.getAttribute("data-raise-amount")) === Number(amount)));
+  }
   function updateActions() {
     const enabled = Boolean(canAct()), legal = game?.legal || {};
     $("fold-action").disabled = !enabled || legal.canFold === false;
@@ -190,7 +185,8 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
       const button = node("button", ""); button.type = "button";
       const label = node("span", "", "加注"); label.append(node("b", "", formatChips(amount)));
       button.append(label, node("small", "", Math.round(ratio * 100) + "%"));
-      button.addEventListener("click", () => act("raise", amount)); presets.append(button);
+      button.setAttribute("data-raise-amount", String(amount)); button.setAttribute("aria-pressed", "false");
+      button.addEventListener("click", () => chooseRaise(amount)); presets.append(button);
     }
     const controls = roomControls(view), enabledControl = connected && !pending;
     for (const button of seatButtons) {
@@ -370,14 +366,15 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
   $("call-action").addEventListener("click", () => act(game?.legal?.canCheck ? "check" : "call"));
   $("raise-toggle").addEventListener("click", () => {
     if (!canAct() || !game.legal.canRaise) return;
-    const input = $("raise-range"), legal = game.legal;
-    input.min = legal.minRaiseTo; input.max = legal.maxRaiseTo; input.step = legal.chipUnit || 1; input.value = legal.minRaiseTo;
-    $("raise-value").textContent = formatChips(input.value); $("raise-editor").hidden = !$("raise-editor").hidden;
+    chooseRaise(game.legal.minRaiseTo);
+    $("raise-limits").textContent = "可加注 " + formatChips(game.legal.minRaiseTo) + " – " + formatChips(game.legal.maxRaiseTo);
+    $("raise-editor").hidden = !$("raise-editor").hidden;
     $("raise-toggle").setAttribute("aria-expanded", String(!$("raise-editor").hidden));
   });
-  $("raise-range").addEventListener("input", () => { $("raise-value").textContent = formatChips($("raise-range").value); });
+  $("close-raise").addEventListener("click", () => { $("raise-editor").hidden = true; $("raise-toggle").setAttribute("aria-expanded", "false"); });
+  $("raise-range").addEventListener("input", () => chooseRaise(Number($("raise-range").value)));
   $("raise-editor").addEventListener("submit", (event) => { event.preventDefault(); act("raise", Number($("raise-range").value)); });
-  $("all-in-action").addEventListener("click", () => act("raise", game?.legal?.maxRaiseTo));
+  $("all-in-action").addEventListener("click", () => chooseRaise(game?.legal?.maxRaiseTo));
   $("stand-up").addEventListener("click", async () => {
     if (!connected || pending || standConfirmOpen || !roomControls(view).canStand) return;
     standConfirmOpen = true;

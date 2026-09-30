@@ -57,14 +57,6 @@ test("兼容 Java 旧视图的 1 基 seatNo，显式 seatIndex=null 优先代表
   assert.equal(ownSeat({ self: { userId: "u1", seatNo: 4 } }), 3);
 });
 
-test("横屏 2–9 人重新布局仍保持本人底部与真实顺时针座位顺序", () => {
-  for (let count = 2; count <= 9; count++) for (let own = 0; own < count; own++) {
-    const seats = tableLayout(count, own, true);
-    assert.deepEqual(seats[0], { seatIndex: own, x: 50, y: 88 });
-    assert.equal(new Set(seats.map((p) => p.x + ":" + p.y)).size, count);
-    assert.deepEqual(seats.map((p) => p.seatIndex), Array.from({ length: count }, (_, i) => (i + own) % count));
-  }
-});
 
 test("带入下拉只接受服务规定的安全整数、范围和增量，缺配置不能提交", () => {
   const buyIn = { minAmount: 200, maxAmount: 1000, step: 200, options: [200, 200, 400, 300, 0, -200, 1200, "600", Number.MAX_SAFE_INTEGER + 1] };

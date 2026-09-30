@@ -717,3 +717,28 @@ test("打开起身确认后状态变化不再允许起身，确认也不发送�
   elements["confirm-stand"].listeners.click(); await completion;
   assert.ok(!sockets[0].sent.some((frame) => frame.type === "STAND_UP"));
 });
+
+test("加注先打开金额面板，快捷金额和全下只选择，确认后才发送一次 ACTION", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  sockets[0].receive({ type: "SNAPSHOT", payload: gameSnapshot() });
+  elements["raise-toggle"].listeners.click();
+  assert.equal(elements["raise-editor"].hidden, false);
+  assert.match(elements["raise-limits"].textContent, /6.*200/);
+  elements["raise-presets"].children[0].listeners.click();
+  assert.ok(Number(elements["raise-range"].value) >= 6);
+  assert.equal(sockets[0].sent.filter((f) => f.type === "ACTION").length, 0);
+  elements["all-in-action"].listeners.click();
+  assert.equal(Number(elements["raise-range"].value), 200);
+  assert.equal(sockets[0].sent.filter((f) => f.type === "ACTION").length, 0);
+  elements["close-raise"].listeners.click();
+  assert.equal(elements["raise-editor"].hidden, true);
+  elements["raise-toggle"].listeners.click();
+  elements["raise-range"].value = "20"; elements["raise-range"].listeners.input();
+  elements["raise-editor"].listeners.submit({ preventDefault() {} });
+  elements["raise-editor"].listeners.submit({ preventDefault() {} });
+  const sent = sockets[0].sent.filter((f) => f.type === "ACTION");
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].payload.action, "raise"); assert.equal(sent[0].payload.amount, 20);
+  assert.equal(elements["raise-editor"].hidden, true);
+});
