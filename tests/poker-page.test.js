@@ -826,7 +826,7 @@ test("本手结算明确标记赢家并把底池动画移向赢家，重复快�
   assert.equal(elements["pot-label"].textContent, "已分配底池");
   const chips = elements["payout-layer"].children;
   assert.equal(chips.length, 6); assert.ok(chips.every(n => n.attributes["data-winner-seat"] === String(player.seatIndex)));
-  assert.ok(descendants(elements["members-list"]).some(n => n.className === "member-stack" && n.textContent === "当前筹码 500"));
+  assert.ok(!descendants(elements["members-list"]).some(n => n.className === "member-stack" || n.textContent.startsWith("当前筹码")));
   sockets[0].receive({ type: "SNAPSHOT", payload: { ...complete, revision: 3 } });
   assert.equal(elements["payout-layer"].children[0], chips[0]);
   sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: 4, game: { ...first.game, handId: "H2" } } });

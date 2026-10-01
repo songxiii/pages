@@ -65,7 +65,7 @@ Java 已确认 entry/rooms 只要求请求体 ticket，票据允许转发，接�
 
 ### 房间成员金额展示
 
-成员列表使用 `roomMembers[].avatarUrl/nickname/state/online/stack/totalBuyIn/netChips`，当前 Java 视图已提供这些字段，不需要新增查询接口。头像为 30px，缺失、非法地址或加载失败时显示昵称首字。右侧 `netChips > 0` 显示红色「+金额」，小于零显示绿色「-金额」，等于零使用默认字体颜色显示 `0`；同时显示「当前筹码 stack」和「累计带入 totalBuyIn」。每次完整 SNAPSHOT 同步刷新。
+成员列表使用 `roomMembers[].avatarUrl/nickname/state/online/stack/totalBuyIn/netChips`，当前 Java 视图已提供这些字段，不需要新增查询接口。头像为 30px，缺失、非法地址或加载失败时显示昵称首字。右侧 `netChips > 0` 显示红色「+金额」，小于零显示绿色「-金额」，等于零使用默认字体颜色显示 `0`；下方显示「累计带入 totalBuyIn」，成员列表不展示当前筹码。每次完整 SNAPSHOT 同步刷新。
 
 缺失 `netChips` 时，仅在 `stack` 与 `totalBuyIn` 都有效时用两者差额兼容；金额缺失显示 `—`，不能误报零。累计带入只包含已到账金额，未结算的 `pendingBuyIn` 不混入。当前 Java 的 `netChips = stack - totalBuyIn` 是实时账面差额，手牌中已下注但未分配的底池会暂时体现为负数；若产品需要仅统计已完成手牌，Java 应将 `netChips` 改为结算后账本差额，并在下注期间保持上手结果，前端直接使用该值。
 
@@ -286,6 +286,6 @@ Java 校验 token 所属用户、活动和房间后，依次发送 `AUTH_OK` 与
 
 ## 6. 赢家、派奖动画与 10 秒自动续局
 
-复用 game.result.winners 和 game.pot 标记赢家、播放底池筹码飞向赢家；每次手牌首次结算播放一次，重复快照和重连不重放。赢家座位显示获胜及实际奖额，中央显示赢家昵称。单赢家旧协议金额复用 finalPot，多赢家必须由新增 result.payouts 返回实际分配，不能平均猜测。牌面数字和花色放大并靠上排列；成员菜单显示已有 roomMembers.stack。
+复用 game.result.winners 和 game.pot 标记赢家、播放底池筹码飞向赢家；每次手牌首次结算播放一次，重复快照和重连不重放。赢家座位显示获胜及实际奖额，中央显示赢家昵称。单赢家旧协议金额复用 finalPot，多赢家必须由新增 result.payouts 返回实际分配，不能平均猜测。牌面数字和花色放大并靠上排列；成员菜单仅显示累计带入和盈亏，不展示当前筹码；roomMembers.stack 仍用于牌桌余额和账本兼容。
 
 完整协议、持久字段、延续参局资格、startHand/定时扫描复用方式与验收用例见 [赢家派奖与每手结束后10秒自动续局设计](POKER_SETTLEMENT_AUTOPLAY.md)。前端已接 room.nextHand.status/startsAt/sourceHandId 和 serverTime；COUNTDOWN 时显示剩余秒数，0秒等待新 handId 的快照并直接进入下一手，不发送 READY/START_HAND。原版Java暂无自动续局调度时，仅展示结算10秒后等待服务端，自动续局需后端实现后才能生效。

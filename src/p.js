@@ -1,4 +1,4 @@
-import { createPokerTable, formatChips, safeAvatar, memberAmounts } from "./poker-table.js?v=20261001-settlement-next-hand";
+import { createPokerTable, formatChips, safeAvatar, memberAmounts } from "./poker-table.js?v=20261001-member-stack-hidden";
 import { POKER_API_BASE_URL } from "./poker-config.js";
 import { ticketFromLocation, ticketFragmentUrl, validateSettings, redactCredentials, normalizeWebSocketUrl } from "./poker-entry.js";
 
@@ -340,10 +340,6 @@ function renderRoom() {
     detail.textContent = (stateNames[member.state] || member.state || "旁观中")
       + " · " + (member.online ? "在线" : "离线");
     profile.append(name, detail);
-    const currentStack = document.createElement("small");
-    currentStack.className = "member-stack";
-    currentStack.textContent = "当前筹码 " + (member.stack == null ? "—" : formatChips(member.stack));
-    profile.append(currentStack);
     const balance = document.createElement("div");
     balance.className = "member-balance";
     const { totalBuyIn, netChips } = memberAmounts(member);
