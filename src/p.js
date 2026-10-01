@@ -1,6 +1,7 @@
-import { createPokerTable, formatChips, safeAvatar, memberAmounts } from "./poker-table.js?v=20261001-action-effects";
+import { createPokerTable, formatChips, safeAvatar, memberAmounts } from "./poker-table.js?v=20261002-session-summary";
 import { POKER_API_BASE_URL } from "./poker-config.js";
 import { ticketFromLocation, ticketFragmentUrl, validateSettings, redactCredentials, normalizeWebSocketUrl } from "./poker-entry.js";
+import { roomEnded, sessionClock, settlementShowAt, settlementRows, settlementStats } from "./poker-session.js?v=20261002-session-summary";
 
 const $ = (id) => document.getElementById(id);
 const apiBase = POKER_API_BASE_URL.replace(/\/$/, "");
@@ -24,6 +25,7 @@ let reconnectTimer = null;
 let reconnectAttempts = 0;
 let lastWsRequest = null;
 let lastHttpDiagnostic = null;
+let roomClockTimer = null, roomClockOffset = 0, settlementTimer = null;
 const wsRequests = new Map();
 const table = createPokerTable({ document,
   onAction: (action, amount) => sendCommand("ACTION", { action, ...(amount == null ? {} : { amount }), handId: view?.game?.handId ?? view?.game?.handNumber, expectedRevision: view?.revision }),
@@ -73,15 +75,103 @@ function setWsStatus(value) {
 function showPanel(id) {
   $("loading-panel").hidden = true;
   document.body.classList.toggle("room-mode", id === "room-panel");
+  document.body.classList.toggle("settlement-mode", id === "settlement-panel");
+  $("ws-status").hidden = id === "settlement-panel";
+  if (id !== "room-panel") stopSessionClocks();
   $("room-menu").hidden = id !== "room-panel";
   if (id !== "room-panel") $("room-details").hidden = true;
-  for (const panel of ["login-panel", "waiting-panel", "create-panel", "closed-panel", "error-panel", "room-panel", "connection-panel"]) {
+  for (const panel of ["login-panel", "waiting-panel", "create-panel", "closed-panel", "error-panel", "room-panel", "settlement-panel", "connection-panel"]) {
     $(panel).hidden = panel !== id && !(id === "room-panel" && panel === "connection-panel");
   }
 }
+function stopSessionClocks() {
+  clearInterval(roomClockTimer); clearInterval(settlementTimer);
+  roomClockTimer = null; settlementTimer = null; $("session-countdown").hidden = true;
+}
+function updateSessionClock() {
+  const clock = sessionClock(view, Date.now() + roomClockOffset);
+  $("session-countdown").hidden = !clock.visible;
+  text("session-countdown", clock.text || "");
+  $("session-countdown").setAttribute("data-status", clock.status);
+  $("session-countdown").setAttribute("data-urgent", String(clock.seconds !== null && clock.seconds <= 60));
+  // Expiry only blocks starting/joining; the current hand remains server-controlled.
+  if (clock.status === "ENDING") table.updateControls();
+}
+function startSessionClock() {
+  clearInterval(roomClockTimer);
+  const serverTime = Date.parse(view?.serverTime || "");
+  roomClockOffset = Number.isFinite(serverTime) ? serverTime - Date.now() : 0;
+  updateSessionClock();
+  if (sessionClock(view, Date.now() + roomClockOffset).visible) roomClockTimer = setInterval(updateSessionClock, 1000);
+}
+function finishSession(data, live = false) {
+  stopSessionClocks(); clearSocket(); connection = null;
+  toggleDrawer("room-details", "room-menu", false);
+  if ($("stand-dialog").open) $("stand-dialog").close("cancel");
+  view = { ...data, connection: null, self: { ...data.self, allowedCommands: [] } };
+  const serverTime = Date.parse(view.serverTime || "");
+  roomClockOffset = Number.isFinite(serverTime) ? serverTime - Date.now() : 0;
+  const display = () => { table.reset(); showPanel("settlement-panel"); renderSettlement(); setWsStatus("已结束"); };
+  // Opening or refreshing an ended room always goes straight to the final report.
+  if (!live || view.game && view.game.phase !== "complete") { display(); return; }
+  showPanel("room-panel"); renderRoom(); clearInterval(roomClockTimer); roomClockTimer = null;
+  setWsStatus("已结束"); table.setConnected(false, view.game ? "本场已结束，正在展示最后一手结果" : "本场已结束，正在进入结算");
+  const deadline = settlementShowAt(view, Date.now() + roomClockOffset);
+  const tick = () => {
+    const seconds = Math.max(0, Math.ceil((deadline - Date.now() - roomClockOffset) / 1000));
+    if (!seconds) { display(); return; }
+    $("session-countdown").hidden = false;
+    $("session-countdown").setAttribute("data-status", "ENDED");
+    text("session-countdown", "结算 · " + seconds + "s");
+  };
+  tick();
+  if (!$("room-panel").hidden) settlementTimer = setInterval(tick, 250);
+}
+function summaryNode(tag, className, value) {
+  const node = document.createElement(tag); node.className = className;
+  if (value != null) node.textContent = String(value);
+  return node;
+}
+function renderSettlement() {
+  const report = view?.settlement?.status === "FINAL" ? view.settlement : null;
+  text("settlement-title", view?.activity?.title || view?.room?.name || "牌局结算");
+  const endedAt = Date.parse(report?.endedAt || view?.room?.timing?.endedAt || "");
+  text("settlement-ended-at", Number.isFinite(endedAt) ? "结束于 " + new Date(endedAt).toLocaleString("zh-CN", { hour12: false }) : "本场牌局已结束");
+  const stats = settlementStats(report);
+  for (const [id, key] of [["settlement-total-hands", "totalHands"], ["settlement-total-buy-in", "totalBuyIn"], ["settlement-total-pot", "totalPot"], ["settlement-max-pot", "maxPot"]]) {
+    text(id, stats[key] === null ? "—" : formatChips(stats[key]));
+  }
+  const settings = view?.room?.settings || {}, meta = $("settlement-meta"); meta.replaceChildren();
+  meta.append(summaryNode("span", "", "德州 " + formatChips(settings.smallBlind) + "/" + formatChips(settings.bigBlind)));
+  const createdAt = Date.parse(report?.createdAt || view?.room?.createdAt || "");
+  if (Number.isFinite(createdAt)) meta.append(summaryNode("span", "", new Date(createdAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })));
+  if (Number.isSafeInteger(settings.durationMinutes)) meta.append(summaryNode("span", "", settings.durationMinutes + " 分钟"));
+  const rows = settlementRows(report), people = $("settlement-players"); people.replaceChildren();
+  const available = report?.status === "FINAL" && Array.isArray(report.players);
+  text("settlement-notice", !available ? "服务端尚未返回完整结算数据，请稍后重新获取。" : !rows.length ? "本场暂无成员统计。" : "");
+  if (!available) return;
+  rows.forEach((player, index) => {
+    const mine = String(view.self?.userId ?? view.self?.id) === player.userId;
+    const row = summaryNode("article", "settlement-player" + (mine ? " is-self" : ""));
+    row.setAttribute("data-user-id", player.userId);
+    const avatar = summaryNode("div", "settlement-avatar", [...(player.nickname || "玩家")][0]);
+    const url = safeAvatar(player.avatarUrl);
+    if (url) { const img = summaryNode("img", ""); img.src = url; img.alt = ""; img.referrerPolicy = "no-referrer"; img.addEventListener("error", () => img.remove()); avatar.append(img); }
+    avatar.append(summaryNode("span", "settlement-rank" + (index === 0 && player.netChips > 0 ? " is-mvp" : ""), index === 0 && player.netChips > 0 ? "MVP" : index + 1));
+    const profile = summaryNode("div", "settlement-profile"), name = summaryNode("strong", "settlement-name", player.nickname || "玩家");
+    name.setAttribute("title", player.nickname || "玩家");
+    const details = summaryNode("div", "settlement-player-meta");
+    details.append(summaryNode("span", "", "ID: " + player.userId), summaryNode("span", "settlement-hands", "手数 " + (player.handsPlayed === null ? "—" : formatChips(player.handsPlayed))));
+    profile.append(name, details);
+    const balance = summaryNode("div", "settlement-balance");
+    balance.append(summaryNode("strong", "settlement-profit" + (player.netChips > 0 ? " profit-positive" : player.netChips < 0 ? " profit-negative" : ""), player.netChips === null ? "—" : player.netChips > 0 ? "+" + formatChips(player.netChips) : formatChips(player.netChips)),
+      summaryNode("span", "settlement-buy-in", "带入 " + (player.totalBuyIn === null ? "—" : formatChips(player.totalBuyIn))));
+    row.append(avatar, profile, balance); people.append(row);
+  });
+}
 function setBusy(value) {
   busy = value;
-  for (const id of ["create-room", "refresh-entry", "retry-entry", "connect-ws"]) $(id).disabled = value;
+  for (const id of ["create-room", "refresh-entry", "retry-entry", "connect-ws", "refresh-settlement"]) $(id).disabled = value;
   $("login-form").querySelector("button").disabled = value;
 }
 function updateSystemVersion(value) {
@@ -184,6 +274,11 @@ async function enterRoom(autoConnect = true, background = false) {
     success = true;
     return true;
   } catch (error) {
+    if (roomEnded(view) && (!error.status || error.status >= 500)) {
+      text("settlement-notice", "结算数据获取失败，请稍后重新获取。");
+      if (!background) showError(error.message, error.diagnostic);
+      return false;
+    }
     if (background && (!error.status || error.status >= 500)) {
       setWsStatus("重连中");
       text("ws-detail", "重新检查房间失败，正在尝试恢复连接。");
@@ -239,6 +334,7 @@ async function createRoom(event) {
   }
 }
 function applyView(data) {
+  stopSessionClocks();
   view = data;
   $("activity-panel").hidden = !data.canCreate;
   const activity = data.activity || {};
@@ -250,6 +346,7 @@ function applyView(data) {
   text("self-name", self.nickname || "活动成员");
   text("self-role", self.role === "CREATOR" ? "活动创建人" : "活动成员");
   text("activity-count", number(counts.activityParticipantCount));
+  if (roomEnded(data)) { finishSession(data); return; }
   if (!["ROOM_READY", "ROOM_CREATED"].includes(data.entryState)) {
     clearSocket(); connection = null; table.reset();
     setWsStatus(data.canCreate ? "待开房" : "活动入口");
@@ -262,8 +359,7 @@ function applyView(data) {
       showPanel(data.canCreate ? "create-panel" : "waiting-panel");
       break;
     case "ROOM_CLOSED":
-      clearSocket();
-      showPanel("closed-panel");
+      finishSession(data);
       break;
     case "ROOM_READY":
     case "ROOM_CREATED":
@@ -308,6 +404,9 @@ function renderRoom() {
   addDefinition(list, "盲注", number(settings.smallBlind) + " / " + number(settings.bigBlind));
   addDefinition(list, "初始筹码", number(settings.startingStack));
   addDefinition(list, "行动时限", (settings.turnSeconds || "—") + " 秒");
+  addDefinition(list, "游戏时长", settings.durationMinutes ? settings.durationMinutes + " 分钟" : "服务端未提供");
+  const endsAt = Date.parse(room.timing?.endsAt || "");
+  addDefinition(list, "结束时间", Number.isFinite(endsAt) ? new Date(endsAt).toLocaleString("zh-CN", { hour12: false }) : "服务端未提供");
   addDefinition(list, "本人当前筹码", own ? number(own.stack) : "—");
   const people = $("members-list");
   people.replaceChildren();
@@ -355,6 +454,7 @@ function renderRoom() {
     people.append(element);
   }
   table.render(view);
+  startSessionClock();
   connection = view.connection || null;
   let wsUrl = connection?.url;
   try { if (wsUrl) wsUrl = normalizeWebSocketUrl(wsUrl, apiBase); }
@@ -485,15 +585,23 @@ async function connectWebSocket() {
       if (Number.isFinite(revision) && revision <= lastRevision) return;
       if (Number.isFinite(revision)) lastRevision = revision;
       view = { ...view, ...frame.payload, self: { ...view.self, ...frame.payload.self }, room: { ...view.room, ...frame.payload.room }, connection };
-      if (view.entryState === "ROOM_CLOSED" || view.room?.status === "CLOSED") {
-        clearSocket(); table.reset(); connection = null; showPanel("closed-panel"); return;
-      }
+      if (roomEnded(view)) { finishSession(view, true); return; }
       reconnectAttempts = 0;
       message("");
       table.setConnected(true);
       renderRoom();
     } else if (frame.type === "ROOM_CLOSED" && authenticated) {
-      clearSocket(); table.reset(); connection = null; showPanel("closed-panel");
+      const payload = frame.payload || {};
+      // Legacy ROOM_CLOSED is only a notification, not a final hand or report.
+      // Fetch the authoritative entry instead of treating our old table as settled.
+      if (!payload.settlement || !payload.room) {
+        clearSocket(); table.reset(); connection = null;
+        view = { ...view, entryState: "ROOM_CLOSED", room: { ...view.room, status: "CLOSED" }, settlement: null };
+        finishSession(view);
+        enterRoom(false, true);
+      } else {
+        finishSession({ ...view, ...payload, entryState: "ROOM_CLOSED", self: { ...view.self, ...payload.self }, room: { ...view.room, ...payload.room, status: "CLOSED" } }, true);
+      }
     } else if (frame.type === "ERROR" || frame.type === "AUTH_EXPIRED") {
       const detail = frame.payload?.message || "操作未完成，请稍后重试";
       table.reject(detail);
@@ -568,6 +676,7 @@ $("refresh-room").addEventListener("click", () => { reconnectAttempts = 0; retur
 $("retry-login").addEventListener("click", enterRoom);
 $("refresh-entry").addEventListener("click", enterRoom);
 $("retry-entry").addEventListener("click", enterRoom);
+$("refresh-settlement").addEventListener("click", () => enterRoom(false));
 $("connect-ws").addEventListener("click", () => { reconnectAttempts = 0; return connectWebSocket(); });
 $("copy-ws-url").addEventListener("click", async () => {
   if (!connection?.url) return;

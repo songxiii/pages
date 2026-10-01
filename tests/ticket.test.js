@@ -65,7 +65,7 @@ test("旧查询参数链接转成可刷新的 fragment 链接", () => {
 });
 
 test("建房设置遵循服务端限制，调试数据会遮盖凭证", () => {
-  const valid = { maxSeats: "6", seatingType: "0", smallBlind: "10", bigBlind: "20", startingStack: "1000", turnSeconds: "30" };
+  const valid = { maxSeats: "6", seatingType: "0", smallBlind: "10", bigBlind: "20", startingStack: "1000", turnSeconds: "30", durationMinutes: "120" };
   assert.equal(validateSettings(valid).startingStack, 1000);
   assert.throws(() => validateSettings({ ...valid, startingStack: "100" }), /20 倍/);
   assert.throws(() => validateSettings({ ...valid, maxSeats: "10" }), /2–9/);

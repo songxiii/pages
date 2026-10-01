@@ -5,8 +5,9 @@ import { runInNewContext } from "node:vm";
 import { webcrypto } from "node:crypto";
 import { ticketFromLocation, ticketFragmentUrl, validateSettings, redactCredentials, normalizeWebSocketUrl } from "../src/poker-entry.js";
 
-const tableScript = readFileSync(new URL("../src/poker-table.js", import.meta.url), "utf8").replace(/^export /gm, "");
-const script = tableScript + "\n" + readFileSync(new URL("../src/p.js", import.meta.url), "utf8").replace(/^import .*;\n/gm, "");
+const tableScript = readFileSync(new URL("../src/poker-table.js", import.meta.url), "utf8").replace(/^export /gm, "").replace(/^import .*;\n/gm, "");
+const sessionScript = readFileSync(new URL("../src/poker-session.js", import.meta.url), "utf8").replace(/^export /gm, "");
+const script = sessionScript + "\n" + tableScript + "\n" + readFileSync(new URL("../src/p.js", import.meta.url), "utf8").replace(/^import .*;\n/gm, "");
 
 function element() {
   return {
@@ -140,7 +141,7 @@ test("跨域或网络错误显示可重试错误状态", async () => {
 });
 
 test("已有房间直接展示牌桌并自动连接 WebSocket", async () => {
-  const settings = { maxSeats: 6, seatingType: 0, smallBlind: 10, bigBlind: 20, startingStack: 1000, turnSeconds: 30 };
+  const settings = { maxSeats: 6, seatingType: 0, smallBlind: 10, bigBlind: 20, startingStack: 1000, turnSeconds: 30, durationMinutes: 120 };
   const { elements, calls } = mount([{ status: 200, body: {
     code: 0, message: "success", systemVersion: version,
     data: { entryState: "ROOM_READY", created: false, activity, self, counts,
@@ -157,7 +158,7 @@ test("已有房间直接展示牌桌并自动连接 WebSocket", async () => {
 });
 
 test("创建人选择配置建房后显示房间和 WebSocket 链接", async () => {
-  const settings = { maxSeats: 6, seatingType: 0, smallBlind: 10, bigBlind: 20, startingStack: 1000, turnSeconds: 30 };
+  const settings = { maxSeats: 6, seatingType: 0, smallBlind: 10, bigBlind: 20, startingStack: 1000, turnSeconds: 30, durationMinutes: 120 };
   const { elements, calls } = mount([
     { status: 200, body: { code: 0, message: "success", systemVersion: version,
       data: { entryState: "READY_TO_CREATE", canCreate: true, activity, self, counts } } },
@@ -353,7 +354,7 @@ test("隐藏对手底牌，忽略旧快照，同一手不重复发牌；新手�
 });
 
 test("旁观者不可行动；服务端授权后才显示入座准备选项；关房移除牌桌", async () => {
-  const { elements, sockets } = mount([roomResponse()]);
+  const { elements, sockets } = mount([roomResponse(), roomResponse({}, { entryState: "ROOM_CLOSED", connection: null })]);
   await new Promise(setImmediate); authenticate(sockets[0]);
   sockets[0].receive({ type: "SNAPSHOT", payload: gameSnapshot({ self: { ...self, seatIndex: null, allowedCommands: ["SIT_DOWN"] } }) });
   assert.equal(elements["fold-action"].disabled, true);
@@ -363,7 +364,7 @@ test("旁观者不可行动；服务端授权后才显示入座准备选项；�
   empty.listeners.click();
   assert.equal(sockets[0].sent.at(-1).type, "SIT_DOWN");
   sockets[0].receive({ type: "ROOM_CLOSED" });
-  assert.equal(elements["closed-panel"].hidden, false);
+  assert.equal(elements["settlement-panel"].hidden, false);
   assert.equal(elements["room-panel"].hidden, true);
 });
 
@@ -973,4 +974,106 @@ test("行动倒计时使用服务器时间，最后十秒标红，离线仍计�
   assert.ok(!mine.className.includes(" folded"));
   assert.ok(!sockets[0].sent.some(f => f.type === "ACTION"));
   assert.equal(elements["fold-action"].disabled, true);
+});
+
+function finalSnapshot(now = Date.now()) {
+  const first = gameSnapshot();
+  return { ...first, entryState: "ROOM_CLOSED", revision: 10, activity, connection: null, serverTime: new Date(now).toISOString(),
+    room: { ...first.room, status: "CLOSED", settings: { ...first.room.settings, durationMinutes: 120 },
+      timing: { status: "ENDED", endsAt: new Date(now - 30000).toISOString(), endedAt: new Date(now).toISOString() } },
+    game: { ...first.game, phase: "complete", turn: null, legal: null, result: { winners: [0], hands: null } },
+    settlement: { status: "FINAL", endedAt: new Date(now).toISOString(), showAt: new Date(now + 10000).toISOString(),
+      totalHands: 3, totalBuyIn: 600, totalPot: 24, maxPot: 16,
+      players: [{ userId: "2", nickname: "亏损成员", totalBuyIn: 200, handsPlayed: 3, netChips: -100 },
+        { userId: "3", nickname: "持平成员", totalBuyIn: 200, handsPlayed: 0, netChips: 0 },
+        { userId: "1", nickname: "本人", avatarUrl: "https://example.com/avatar.jpg", totalBuyIn: 200, handsPlayed: 3, netChips: 100 }] } };
+}
+test("已结束房间打开或刷新立即展示完整结算排名，不连接 WS 或等待十秒", async () => {
+  const closed = finalSnapshot();
+  const { elements, sockets } = mount([{ status: 200, body: { code: 0, data: closed } }]);
+  await new Promise(setImmediate);
+  assert.equal(sockets.length, 0); assert.equal(elements["settlement-panel"].hidden, false);
+  assert.equal(elements["room-panel"].hidden, true);
+  assert.equal(elements["settlement-total-hands"].textContent, "3");
+  assert.equal(elements["settlement-total-pot"].textContent, "24");
+  const rows = elements["settlement-players"].children;
+  assert.deepEqual(rows.map(p => p.attributes["data-user-id"]), ["1", "3", "2"]);
+  assert.match(rows[0].className, /is-self/);
+  assert.equal(descendants(rows[0]).find(p => p.className.includes("settlement-profit")).textContent, "+100");
+  assert.equal(descendants(rows[1]).find(p => p.className.includes("settlement-profit")).textContent, "0");
+  assert.match(descendants(rows[2]).find(p => p.className.includes("settlement-profit")).className, /profit-negative/);
+  assert.equal(descendants(rows[2]).find(p => p.className === "settlement-hands").textContent, "手数 3");
+  assert.equal(descendants(rows[2]).find(p => p.className === "settlement-buy-in").textContent, "带入 200");
+});
+test("到期不结束未完成手牌，最终关房快照后按服务端截止十秒自动进入结算", async () => {
+  let now = Date.now(); class ClockDate extends Date { static now() { return now; } }
+  const { elements, sockets, intervals } = mount([roomResponse()], "", { Date: ClockDate });
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const first = gameSnapshot();
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, serverTime: new Date(now + 60000).toISOString(),
+    room: { ...first.room, timing: { status: "OPEN", endsAt: new Date(now + 65000).toISOString() } } } });
+  assert.equal(elements["session-countdown"].textContent, "剩余 00:00:05");
+  now += 5000; for (const tick of intervals.values()) tick();
+  assert.equal(elements["session-countdown"].textContent, "时间已到 · 本手结束后结算");
+  assert.equal(elements["fold-action"].disabled, false);
+  assert.equal(elements["settlement-panel"].hidden, true);
+  const closed = finalSnapshot(now + 60000);
+  elements["room-details"].hidden = false; elements["stand-dialog"].showModal();
+  sockets[0].receive({ type: "SNAPSHOT", payload: closed });
+  assert.equal(elements["room-details"].hidden, true); assert.equal(elements["stand-dialog"].open, false);
+  assert.equal(elements["settlement-panel"].hidden, true);
+  assert.equal(elements["session-countdown"].textContent, "结算 · 10s");
+  assert.equal(elements["fold-action"].disabled, true);
+  now += 4000; for (const tick of intervals.values()) tick();
+  assert.equal(elements["session-countdown"].textContent, "结算 · 6s");
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...closed, revision: 11 } });
+  assert.equal(elements["session-countdown"].textContent, "结算 · 6s");
+  now += 6000; for (const tick of intervals.values()) tick();
+  assert.equal(elements["room-panel"].hidden, true); assert.equal(elements["settlement-panel"].hidden, false);
+  assert.equal(elements["settlement-players"].children.length, 3);
+  assert.ok(!sockets[0].sent.some(f => ["READY", "START_HAND", "RESUME_GAME"].includes(f.type)));
+});
+test("缺少结算字段不能用当前成员伪造整场统计，重试复用 entry 获取最终数据", async () => {
+  const closed = { ...finalSnapshot(), settlement: null };
+  const { elements, calls, sockets } = mount([{ status: 200, body: { code: 0, data: closed } },
+    { status: 200, body: { code: 0, data: finalSnapshot() } }]);
+  await new Promise(setImmediate);
+  assert.equal(elements["settlement-total-hands"].textContent, "—");
+  assert.equal(elements["settlement-players"].children.length, 0);
+  assert.match(elements["settlement-notice"].textContent, /尚未返回完整结算/);
+  elements["refresh-settlement"].listeners.click(); await new Promise(setImmediate);
+  assert.equal(calls.length, 2); assert.ok(calls.every(c => c.url.endsWith("/api/poker/v1/entry")));
+  assert.equal(elements["settlement-players"].children.length, 3); assert.equal(sockets.length, 0);
+});
+test("旧 ROOM_CLOSED 仅通知时重新读取权威结算，不把旧手牌视为完成", async () => {
+  const { elements, sockets, calls } = mount([roomResponse(), { status: 200, body: { code: 0, data: finalSnapshot() } }]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  sockets[0].receive({ type: "SNAPSHOT", payload: gameSnapshot() });
+  sockets[0].receive({ type: "ROOM_CLOSED", payload: { message: "房间已关闭" } });
+  await new Promise(setImmediate);
+  assert.equal(calls.length, 2); assert.equal(elements["settlement-panel"].hidden, false);
+  assert.equal(elements["settlement-total-pot"].textContent, "24");
+  assert.equal(elements["payout-layer"].children.length, 0);
+});
+
+test("未冻结报告不显示为最终统计，重新获取失败保留已确认的报告及诊断弹框", async () => {
+  const closed = finalSnapshot();
+  const { elements, sockets } = mount([
+    { status: 200, body: { code: 0, data: { ...closed, settlement: { ...closed.settlement, status: "DRAFT" } } } },
+    { status: 200, body: { code: 0, data: closed } },
+    { status: 503, body: { code: 503, message: "稍后重试" } },
+  ]);
+  await new Promise(setImmediate);
+  assert.equal(elements["settlement-total-pot"].textContent, "—");
+  assert.equal(elements["settlement-players"].children.length, 0);
+  elements["refresh-settlement"].listeners.click(); await new Promise(setImmediate);
+  assert.equal(elements["settlement-total-pot"].textContent, "24");
+  elements["refresh-settlement"].listeners.click(); await new Promise(setImmediate);
+  assert.equal(elements["settlement-panel"].hidden, false);
+  assert.equal(elements["settlement-total-pot"].textContent, "24");
+  assert.equal(elements["settlement-players"].children.length, 3);
+  assert.match(elements["settlement-notice"].textContent, /获取失败/);
+  assert.equal(elements["error-dialog"].open, true);
+  assert.match(elements["error-request"].textContent, /\/api\/poker\/v1\/entry/);
+  assert.equal(sockets.length, 0);
 });

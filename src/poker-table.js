@@ -1,4 +1,5 @@
 // Activity table: the server owns cards, money, turns and legal actions.
+import { roomEnding, roomEnded } from "./poker-session.js?v=20261002-session-summary";
 export const PHASE_NAMES = { preflop: "翻牌前", flop: "翻牌", turn: "转牌", river: "河牌", complete: "本局结束" };
 // Clockwise visual order starts with the receiving player's seat at bottom center.
 // Each capacity has its own balanced layout; unoccupied seats keep their places.
@@ -104,7 +105,7 @@ export function raisePresets(game) {
   return [1.25, .75, .5, .33].map((ratio) => ({ ratio, amount: Math.min(legal.maxRaiseTo,
     Math.max(legal.minRaiseTo, Math.ceil((bet + call + (pot + call) * ratio) / step) * step)) }));
 }
-export function roomControls(view) {
+export function roomControls(view, now = Date.now()) {
   const own = ownSeat(view);
   const members = Array.isArray(view.roomMembers) ? view.roomMembers : view.game?.players || [];
   const seated = [...new Set(members.filter((member) => !["WATCHING", "STANDING"].includes(member.state))
@@ -114,26 +115,27 @@ export function roomControls(view) {
   const playState = view.room?.playState || (view.room?.status === "PAUSED" ? "PAUSED" : inHand || view.room?.status === "PLAYING" ? "RUNNING" : "WAITING");
   const paused = playState === "PAUSED", pausePending = playState === "PAUSE_PENDING";
   const autoContinuing = playState === "RUNNING" && ["COUNTDOWN", "WAITING_PLAYERS"].includes(view.room?.nextHand?.status);
+  const ending = roomEnding(view, now), closed = roomEnded(view);
   const allowed = Array.isArray(view.self?.allowedCommands) ? view.self.allowedCommands : [];
   // Older snapshots omit command capabilities. Java still validates the request.
-  const canSit = own === null && (Array.isArray(view.self?.allowedCommands) ? allowed.includes("SIT_DOWN")
+  const canSit = !ending && own === null && (Array.isArray(view.self?.allowedCommands) ? allowed.includes("SIT_DOWN")
     : !inHand && view.room?.status !== "CLOSED" && !["ENDED", "CANCELLED"].includes(view.activity?.status));
   const member = members.find((member) => identity(member) != null && String(identity(member)) === String(identity(view.self)));
   const ready = own !== null && playerReady(view, member || { ...view.self, state: view.self?.roomState });
   const readyCount = members.filter((m) => seatIndex(m) !== null && playerReady(view, m)).length;
   return { host, seatedCount: seated.length, readyCount, seated: own !== null, ready, inHand, paused, pausePending, autoContinuing,
     canSit,
-    canStand: own !== null && allowed.includes("STAND_UP"),
-    canReady: own !== null && !inHand && !ready && allowed.includes("READY"),
+    canStand: !closed && own !== null && allowed.includes("STAND_UP"),
+    canReady: !ending && own !== null && !inHand && !ready && allowed.includes("READY"),
     // Current Java accepts UNREADY but older view builders only advertise STAND_UP for ready players.
     // That permission confirms lobby participation; the server still validates cancellation atomically.
-    canUnready: own !== null && !inHand && ready && view.room?.status !== "CLOSED"
+    canUnready: !ending && own !== null && !inHand && ready && view.room?.status !== "CLOSED"
       && !["ENDED", "CANCELLED"].includes(view.activity?.status)
       && (allowed.includes("UNREADY") || allowed.includes("STAND_UP")),
-    canBuyIn: allowed.includes("BUY_IN") && buyInOptions(view).length > 0,
-    canStart: host && seated.length >= 2 && !inHand && !paused && !pausePending && !autoContinuing && allowed.includes("START_HAND"),
-    canPause: host && !paused && !pausePending && (inHand || playState === "RUNNING") && allowed.includes("PAUSE_GAME"),
-    canResume: host && paused && !inHand && seated.length >= 2 && allowed.includes("RESUME_GAME"),
+    canBuyIn: !ending && allowed.includes("BUY_IN") && buyInOptions(view).length > 0,
+    canStart: !ending && host && seated.length >= 2 && !inHand && !paused && !pausePending && !autoContinuing && allowed.includes("START_HAND"),
+    canPause: !ending && host && !paused && !pausePending && (inHand || playState === "RUNNING") && allowed.includes("PAUSE_GAME"),
+    canResume: !ending && host && paused && !inHand && seated.length >= 2 && allowed.includes("RESUME_GAME"),
   };
 }
 export function memberAmounts(member) {
@@ -173,6 +175,7 @@ export function nextHandState(view, now, fallbackDeadline = null) {
   if (view.game && view.room?.nextHand?.sourceHandId != null && String(view.room.nextHand.sourceHandId) !== String(view.game.handId)) return { visible: false };
   if (view.room?.status === "CLOSED" || ["ENDED", "CANCELLED"].includes(view.activity?.status)) return { visible: false };
   if (view.game && view.game.phase !== "complete") return { visible: false };
+  if (roomEnding(view, now)) return { visible: true, text: "本场到时，等待结算" };
   if (view.room?.playState === "PAUSED" || view.room?.playState === "PAUSE_PENDING" || status === "PAUSED") return { visible: true, text: "游戏已暂停" };
   if (status === "WAITING_PLAYERS") return { visible: true, text: "等待至少两名可参局玩家" };
   if (status === "COUNTDOWN") {
@@ -254,7 +257,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
   }
   function canAct() {
     const seat = ownSeat(view);
-    return connected && !pending && !roomControls(view).paused && game?.legal && seat !== null && seat === game.turn && game.phase !== "complete";
+    return connected && !pending && !roomEnded(view) && !roomControls(view, Date.now() + serverOffset).paused && game?.legal && seat !== null && seat === game.turn && game.phase !== "complete";
   }
   function chooseRaise(amount) {
     if (!canAct() || !game.legal.canRaise) return;
@@ -280,10 +283,10 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
       button.setAttribute("data-raise-amount", String(amount)); button.setAttribute("aria-pressed", "false");
       button.addEventListener("click", () => chooseRaise(amount)); presets.append(button);
     }
-    const controls = roomControls(view), enabledControl = connected && !pending;
+    const controls = roomControls(view, Date.now() + serverOffset), enabledControl = connected && !pending;
     for (const button of seatButtons) {
       // Keep unavailable seats clickable to explain why sitting is not possible.
-      button.disabled = pending;
+      button.disabled = pending || roomEnded(view);
       button.setAttribute("aria-disabled", String(!enabledControl || !controls.canSit));
       button.setAttribute("title", controls.seated ? "请先从菜单起身再选择其他座位" : "点击落座");
     }
@@ -321,13 +324,13 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
       : controls.paused ? (controls.seatedCount < 2 ? "游戏已暂停，至少 2 人落座后可继续。" : "游戏已暂停，继续后恢复发牌。")
       : controls.seatedCount < 2 ? "至少需要 2 人落座，目前 " + controls.seatedCount + " 人。"
       : controls.inHand ? "牌局进行中，暂停会在本局结束后生效。" : controls.autoContinuing ? "每手结算后 10 秒自动继续，无需重新准备或开始。" : controls.canStart ? "已有 " + controls.seatedCount + " 人落座，可以开始游戏。" : "已落座 " + controls.seatedCount + " 人，已准备 " + controls.readyCount + " 人，等待开局条件满足。";
-    $("play-state-notice").hidden = !controls.paused && !controls.pausePending;
+    $("play-state-notice").hidden = roomEnded(view) || !controls.paused && !controls.pausePending;
     $("play-state-notice").textContent = controls.paused ? "游戏已暂停 · 等待房主继续" : "房主已申请暂停 · 本局结束后生效";
   }
   function command(type, payload = {}) {
     if (pending) { reportError("正在处理上一项操作，请稍候…"); return; }
     if (!connected) { $("table-notice").textContent = "牌桌连接尚未就绪，请稍候或在菜单中重新连接。"; return; }
-    const controls = roomControls(view);
+    const controls = roomControls(view, Date.now() + serverOffset);
     const permission = { SIT_DOWN: controls.canSit && openSeats.has(payload.seatIndex), READY: controls.canReady,
       UNREADY: controls.canUnready, BUY_IN: controls.canBuyIn && buyInOptions(view).includes(payload.amount),
       STAND_UP: controls.canStand, START_HAND: controls.canStart, PAUSE_GAME: controls.canPause, RESUME_GAME: controls.canResume };
@@ -484,7 +487,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     $("table-phase").textContent = game ? "第 " + (game.handNumber ?? "—") + " 手 · " + (PHASE_NAMES[game.phase] || "牌局进行中") : "等待开局";
     $("table-result").textContent = awards.length ? awards.map((award) => award.nickname + (award.amount === null ? "" : " +" + formatChips(award.amount))).join("、") + " 获胜" : game?.result?.message || "";
     $("table-result").setAttribute("title", $("table-result").textContent);
-    $("table-notice").textContent = !connected ? "正在同步牌局…" : roomControls(view).paused ? "游戏已暂停，等待房主继续"
+    $("table-notice").textContent = !connected ? "正在同步牌局…" : roomControls(view, Date.now() + serverOffset).paused ? "游戏已暂停，等待房主继续"
       : !game ? (selfSeat === null ? (Number(settings.seatingType) === 0 ? "点击任意空座随机落座，由房主开始游戏" : "点击虚线空座落座，由房主开始游戏") : "已入座，等待房主开始游戏")
       : selfSeat === null ? "你正在旁观本场牌局" : canAct() ? "轮到你行动" : game.phase === "complete" ? "本局结束，等待下一手" : "等待其他玩家行动";
     deadline = Date.parse(game?.turnDeadline || "");
@@ -548,9 +551,9 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
   $("raise-editor").addEventListener("submit", (event) => { event.preventDefault(); act("raise", Number($("raise-range").value)); });
   $("all-in-action").addEventListener("click", () => chooseRaise(game?.legal?.maxRaiseTo));
   $("stand-up").addEventListener("click", async () => {
-    if (!connected || pending || standConfirmOpen || !roomControls(view).canStand) return;
+    if (!connected || pending || standConfirmOpen || !roomControls(view, Date.now() + serverOffset).canStand) return;
     standConfirmOpen = true;
-    try { if (await confirmStand() && connected && !pending && roomControls(view).canStand) command("STAND_UP"); }
+    try { if (await confirmStand() && connected && !pending && roomControls(view, Date.now() + serverOffset).canStand) command("STAND_UP"); }
     finally { standConfirmOpen = false; }
   });
   for (const [id, type] of [["ready-player", "READY"], ["unready-player", "UNREADY"], ["start-hand", "START_HAND"], ["pause-game", "PAUSE_GAME"], ["resume-game", "RESUME_GAME"]]) {
@@ -561,6 +564,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
   return {
     render,
     resize,
+    updateControls: updateActions,
     setConnected(value, notice) { connected = value; updateActions(); if (notice) $("table-notice").textContent = notice; },
     reject(message) { clearTimeout(pendingTimer); pending = false; updateActions(); $("table-notice").textContent = message; },
     reset() { clearInterval(timer); clearInterval(nextHandTimer); clearTimeout(pendingTimer); clearTimeout(dealCleanupTimer); clearTimeout(payoutCleanupTimer);

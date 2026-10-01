@@ -28,7 +28,7 @@ export function normalizeWebSocketUrl(value, apiBase) {
 
 export function validateSettings(raw) {
   const settings = {};
-  for (const key of ["maxSeats", "seatingType", "smallBlind", "bigBlind", "startingStack", "turnSeconds"]) {
+  for (const key of ["maxSeats", "seatingType", "smallBlind", "bigBlind", "startingStack", "turnSeconds", "durationMinutes"]) {
     if (raw[key] == null || raw[key] === "") throw new Error("请填写完整房间配置");
     const value = Number(raw[key]);
     if (!Number.isSafeInteger(value)) throw new Error("房间配置必须为有效整数");
@@ -39,6 +39,7 @@ export function validateSettings(raw) {
   if (settings.smallBlind < 1 || settings.bigBlind < settings.smallBlind) throw new Error("大盲注不得小于小盲注");
   if (settings.startingStack < settings.bigBlind * 20) throw new Error("初始筹码至少为大盲注的 20 倍");
   if (settings.turnSeconds < 10 || settings.turnSeconds > 120) throw new Error("行动时限应为 10–120 秒");
+  if (![30, 60, 90, 120, 180, 240, 360, 480].includes(settings.durationMinutes)) throw new Error("请选择有效的游戏时长（30–480 分钟）");
   return settings;
 }
 

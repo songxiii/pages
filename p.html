@@ -6,13 +6,13 @@
   <meta name="referrer" content="no-referrer">
   <meta name="theme-color" content="#0d111b">
   <title>活动牌局</title>
-  <link rel="stylesheet" href="./p.css?v=20261001-action-effects">
+  <link rel="stylesheet" href="./p.css?v=20261002-session-summary">
 </head>
 <body>
   <main class="page">
     <header class="page-head">
       <button id="room-menu" class="icon-button" type="button" aria-label="房间信息" aria-expanded="false" aria-controls="room-details">☰</button>
-      <div class="page-head-spacer" aria-hidden="true"></div>
+      <div class="page-head-spacer"><span id="session-countdown" class="session-countdown" role="status" hidden></span></div>
       <span id="ws-status" class="connection-status">验证中</span>
       <button id="show-error" class="icon-button error-history" type="button" aria-label="查看最近的错误" title="查看最近的错误" hidden>!</button>
     </header>
@@ -35,10 +35,24 @@
           <label>大盲注<select name="bigBlind"><option>2</option><option>4</option><option>10</option><option selected>20</option><option>50</option><option>100</option></select></label>
           <label>初始筹码<select name="startingStack"><option>200</option><option>500</option><option selected>1000</option><option>2000</option><option>5000</option><option>10000</option><option>20000</option></select></label>
           <label>每次行动时间<select name="turnSeconds"><option value="15">15 秒</option><option value="20">20 秒</option><option value="30" selected>30 秒</option><option value="45">45 秒</option><option value="60">60 秒</option><option value="90">90 秒</option><option value="120">120 秒</option></select></label>
+          <label>游戏时长<select name="durationMinutes" required><option value="30">30 分钟</option><option value="60">1 小时</option><option value="90">1.5 小时</option><option value="120" selected>2 小时</option><option value="180">3 小时</option><option value="240">4 小时</option><option value="360">6 小时</option><option value="480">8 小时</option></select></label>
         </div>
-        <div class="create-note"><span>♧</span><p>创建后配置固定。你会先以旁观身份进入，再入座参与牌局。</p></div>
+        <div class="create-note"><span>♧</span><p>开房成功后开始计时，暂停不延长时间。到时完成当前手牌，再进入结算。</p></div>
         <p id="settings-error" role="alert"></p><button id="create-room" class="primary wide" type="submit">创建并进入房间 <span>→</span></button>
       </form>
+    </section>
+
+    <section id="settlement-panel" class="settlement-panel" hidden aria-labelledby="settlement-title">
+      <div class="settlement-heading"><span class="settlement-overline">本场已结束</span><h1 id="settlement-title">牌局结算</h1><p id="settlement-ended-at"></p></div>
+      <div class="settlement-overview">
+        <div class="settlement-emblem" aria-hidden="true">♠</div>
+        <dl class="settlement-totals"><div><dt>全部手数</dt><dd id="settlement-total-hands">—</dd></div><div><dt>牌局总金额</dt><dd id="settlement-total-pot">—</dd></div><div><dt>全部带入</dt><dd id="settlement-total-buy-in">—</dd></div><div><dt>最大底池</dt><dd id="settlement-max-pot">—</dd></div></dl>
+        <div id="settlement-meta" class="settlement-meta"></div><p class="settlement-caption">牌局总金额为所有已结算手牌的底池累计。</p>
+      </div>
+      <div class="settlement-list-heading"><h2>本场排名</h2><span>按净盈利排序</span></div>
+      <p id="settlement-notice" class="settlement-notice" role="status"></p>
+      <div id="settlement-players" class="settlement-players"></div>
+      <button id="refresh-settlement" class="secondary settlement-refresh" type="button">重新获取结算</button>
     </section>
 
     <section id="room-panel" class="table-panel" hidden aria-label="当前牌局">
@@ -78,7 +92,7 @@
       </section>
       <div class="summary-grid"><div><small>成员</small><strong id="room-member-count">0</strong></div><div><small>在线</small><strong id="online-count">0</strong></div><div><small>入座</small><strong id="seated-count">0</strong></div><div><small>你的状态</small><strong id="self-state">旁观中</strong></div></div><details class="menu-more"><summary>房间配置</summary><dl id="room-settings" class="settings-list"></dl></details><details class="menu-more"><summary>房间成员</summary><div id="members-list" class="members-list"></div></details>
       <details id="connection-panel" class="menu-more" hidden><summary>连接状态</summary><p id="ws-detail" class="muted" role="status"></p><button id="connect-ws" class="secondary" type="button">重新连接</button> <button id="refresh-room" class="secondary" type="button">重新检查房间</button></details>
-      <div class="versions"><span>页面版本 <time id="page-version" datetime="2026-10-01T00:17:31+08:00">2026-10-01 00:17:31</time></span><span>服务版本 <strong id="system-version">等待响应</strong></span></div>
+      <div class="versions"><span>页面版本 <time id="page-version" datetime="2026-10-02T00:54:45+08:00">2026-10-02 00:54:45</time></span><span>服务版本 <strong id="system-version">等待响应</strong></span></div>
     </aside>
     <details id="debug-panel" class="debug-panel" hidden><summary>接口调试</summary><form id="login-form"><label for="access-token">联调 Access token</label><input id="access-token" type="password" autocomplete="off" placeholder="当前账号的 access token"><button class="secondary" type="submit">验证并进入</button></form><div class="versions"><span>协议 <strong id="protocol-version">—</strong></span><span>凭证有效至 <strong id="ws-expires">—</strong></span></div><div class="connection-url"><code id="ws-url"></code><button id="copy-ws-url" class="secondary" type="button">复制地址</button></div><h3 id="debug-endpoint">请求接口</h3><pre id="debug-request"></pre><h3>响应</h3><pre id="debug-response"></pre></details>
     <dialog id="stand-dialog" class="confirm-dialog" aria-labelledby="stand-dialog-title" aria-describedby="stand-dialog-description">
@@ -91,6 +105,6 @@
       <details id="error-diagnostics" class="error-diagnostics"><summary>查看错误详情</summary><p class="muted">请求与返回内容如下，登录凭证已隐藏。</p><h3>接口请求</h3><pre id="error-request"></pre><h3>接口返回</h3><pre id="error-response"></pre></details>
     </dialog>
   </main>
-  <script type="module" src="./src/p.js?v=20261001-action-effects"></script>
+  <script type="module" src="./src/p.js?v=20261002-session-summary"></script>
 </body>
 </html>

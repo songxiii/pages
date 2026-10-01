@@ -1,5 +1,7 @@
 # 手牌遮挡、行动特效与离线超时弃牌
 
+2026-10-02 时长、最终结算及之前剩余项的统一交付清单见 [POKER_BACKEND_CAPABILITIES.md](POKER_BACKEND_CAPABILITIES.md)，本轮请优先使用该文档。
+
 核对日期：2026-10-01。核对相邻 `daoleme` 当前 Java 源码；部署是否包含这些变更仍需真实房间联调。沿用活动 v1 WebSocket 与完整 SNAPSHOT，不新增 HTTP 接口或客户端超时命令。
 
 ## 已有字段直接复用

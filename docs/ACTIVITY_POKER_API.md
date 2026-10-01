@@ -1,12 +1,14 @@
 # p.html 活动牌桌与 Java 对接
 
-本次前端已经实现三个用户视图：错误/等待提示、创建人的下拉开房页、自动连接的活动牌桌。此文是 **活动入口 v1** 的对接约定，和 `docs/WEBSOCKET_PROTOCOL.md` 里首页双人演示的 **小写消息协议** 分开使用，不能混用。
+本次前端已经实现四个用户视图：错误/等待提示、创建人的下拉开房页、自动连接的活动牌桌、按盈亏排名的最终结算页。此文是 **活动入口 v1** 的对接约定，和 `docs/WEBSOCKET_PROTOCOL.md` 里首页双人演示的 **小写消息协议** 分开使用，不能混用。
 
 仓库已有 `/entry`、`/rooms`、`AUTH`、`AUTH_OK`、`PING`、`SNAPSHOT` 的前端接入。2026-09-30 Java 已补齐下文的完整牌局快照及 `SIT_DOWN/READY/STAND_UP/START_HAND/ACTION`，代码与部署说明见相邻 Java 仓库 `docs/POKER_ACTIVITY_V1.md`。前端曾用模拟服务验证；真实活动 ticket、MySQL 迁移与公网 WSS 联调仍待部署验证。
 
 Java 的当前鉴权口径为 **ticket-only**：entry/rooms 不需要 Authorization，身份来自服务端校验的 ticket。数据库需新增 `poker_activity_state/poker_activity_command`；牌局加密默认从已有 `POKER_WS_SECRET` 派生，无需增加密钥配置，`POKER_STATE_KEY` 是可选优先覆盖。外部 `seatIndex` 从 0 开始，数据库 `seat_no` 保持 1 起；Java 早期设计稿中的 `SET_READY/PLAYER_ACTION/commandId/actionId` 和增量事件不用于此页面。
 
 原有新命令的设计与验收见 [Java 后端接口设计](POKER_BACKEND_TODO.md)。**最新赢家派奖与每手结束后 10 秒自动续局设计见 [POKER_SETTLEMENT_AUTOPLAY.md](POKER_SETTLEMENT_AUTOPLAY.md)**；首次准备/开始后连续进行，后续不再要求准备或房主再次开始。
+
+**2026-10-02 新增时长和整场结算，以 [统一后端能力文档](POKER_BACKEND_CAPABILITIES.md) 为准**：durationMinutes、room.timing、最终 settlement；复用现有 HTTP/WS，不新增接口。当前 Java 未支持 durationMinutes，先升级 Java 再启用新版开房。
 
 ## 1. 活动入口和开房（沿用）
 
@@ -33,7 +35,8 @@ Content-Type: application/json
 | `canCreate` | Java 根据活动创建人身份计算，前端据此提供开房表单 |
 | `activity` | `activityId`, `title`, `status` |
 | `self` | 本人 `userId`（兼容 `id`）, `nickname`, `role`, `roomState`, `seatIndex`, `allowedCommands` |
-| `room` | `roomId`, `name`, `status`, `settings` |
+| `room` | `roomId`, `name`, `status`, `settings`, `timing`（本轮新增） |
+| `settlement` | 结束时返回 FINAL 全场统计及玩家排名；完整字段见统一后端能力文档 |
 | `counts` | `activityParticipantCount`, `roomMemberCount`, `onlineCount`, `seatedCount` |
 | `roomMembers` | 成员列表，包括座位和头像，见下文 |
 | `connection` | `url`, `wsToken`, `protocolVersion`, `expiresAt`；已有房间时必须返回 |
@@ -48,7 +51,7 @@ Content-Type: application/json
 ```http
 POST /api/poker/v1/rooms
 
-{"ticket":"...","settings":{"maxSeats":6,"seatingType":0,"smallBlind":10,"bigBlind":20,"startingStack":1000,"turnSeconds":30}}
+{"ticket":"...","settings":{"maxSeats":6,"seatingType":0,"smallBlind":10,"bigBlind":20,"startingStack":1000,"turnSeconds":30,"durationMinutes":120}}
 ```
 
 返回同入口结构，`entryState=ROOM_CREATED` 或 `ROOM_READY`，同时返回 `connection`。成功后自动连接。并发已创建可返回 409，前端会重新检查入口。
@@ -213,7 +216,7 @@ Java 校验 token 所属用户、活动和房间后，依次发送 `AUTH_OK` 与
 {"type":"ERROR","requestId":"对应请求 uuid","payload":{"code":"NOT_YOUR_TURN","message":"还没有轮到你行动"}}
 ```
 
-操作错误不会把已认证的连接标记成失败；认证过期请发 `AUTH_EXPIRED` 并关闭连接。关房请发送 `ROOM_CLOSED`，或发送 `room.status=CLOSED` 的完整快照。
+操作错误不会把已认证的连接标记成失败；认证过期请发 `AUTH_EXPIRED` 并关闭连接。关房须发送含最后一手 game、room.timing、settlement 的完整 SNAPSHOT，或内容同样完整的 ROOM_CLOSED。在线展示最后一手10秒，刷新直接结算，详见统一能力文档。
 
 ## 部署后联调清单
 

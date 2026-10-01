@@ -1,5 +1,7 @@
 # 活动牌桌：Java 后端待实现接口设计
 
+2026-10-02 时长、最终结算及之前剩余项的统一交付清单见 [POKER_BACKEND_CAPABILITIES.md](POKER_BACKEND_CAPABILITIES.md)，本轮请优先使用该文档。
+
 核对日期：2026-10-01。页面：`p.html`。核对依据是相邻 `daoleme` 仓库当前源码，不代表公网部署已完成验证。本文件可以直接交给 Java 开发；完整现有协议见 [ACTIVITY_POKER_API.md](ACTIVITY_POKER_API.md)。
 
 最新核对更新：相邻 Java 已补齐 UNREADY/BUY_IN/PAUSE_GAME/RESUME_GAME 的业务与快照授权、带入/暂停字段，以及 UTG 等位置；这些原有缺口进入部署验收阶段。前端保留对只授权 STAND_UP 的旧取消准备快照的兼容。

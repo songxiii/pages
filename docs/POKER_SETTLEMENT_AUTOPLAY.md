@@ -1,5 +1,7 @@
 # Java 对接补充：赢家派奖与每手结束后 10 秒自动续局
 
+2026-10-02 时长、最终结算及之前剩余项的统一交付清单见 [POKER_BACKEND_CAPABILITIES.md](POKER_BACKEND_CAPABILITIES.md)，本轮请优先使用该文档。
+
 核对日期：2026-10-01；页面 p.html。规则已经明确：房主只在首次开始游戏，随后每手结算展示 10 秒，由服务器自动开始下一手；原参局人员不用重新准备，房主不用再次点开始。暂停、起身、退出活动、筹码不足或有效参局人数不足时停止自动续局。
 
 本文件核对相邻 daoleme 当前源码，公网部署仍需真实 ticket 联调。完整入口与 WS 协议沿用 [ACTIVITY_POKER_API.md](ACTIVITY_POKER_API.md)，不新增 HTTP 接口，不新增客户端“下一手”命令。
