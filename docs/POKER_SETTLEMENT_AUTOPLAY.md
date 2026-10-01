@@ -11,11 +11,11 @@
 | 赢家 | PokerHand.result.winners 为真实零基座位数组 | 赢家座位显示“获胜”、头像高亮，中央显示赢家昵称 |
 | 底池 | game.pot，complete 时是扣除未跟注退回后的 finalPot | 底池筹码飞向赢家；金额和余额不在前端计算入账 |
 | 成员当前筹码 | roomMembers.stack 已提供且 persistHand 写回 | 牌桌余额沿用此字段；最新要求成员菜单不展示当前筹码 |
-| 各赢家实得金额 | 只有赢家数组，没有每人分池金额 | 单赢家复用 pot；多赢家只标记获胜，不把 pot 平均分配 |
-| 下一手 | startHand 可复用，但 persistHand 每次写 ready=false；当前调度只处理行动超时等 | 已接入下面的 room.nextHand；倒计时到零等待新快照，不发 READY/START_HAND |
+| 各赢家实得金额 | 已加入 result.payouts 和 settledAt | 优先实得 payouts；旧服务单赢家复用 pot，多赢家不猜金额 |
+| 下一手 | 已加入 room.nextHand、首次结算恢复 ready、持久排期和自动开手 | 已接入下面的 room.nextHand；倒计时到零等待新快照，不发 READY/START_HAND |
 | 准备、带入、暂停、继续 | 最新业务及视图已加入 UNREADY/BUY_IN/PAUSE_GAME/RESUME_GAME、playState、buyIn 等 | 沿用现有命令与授权，仍须部署验收 |
 
-因此后端本轮主要补：**result.payouts、result.settledAt，以及 room.nextHand 的持久化倒计时、自动参局资格延续和定时开手**。不是要求重做已有结算引擎。
+最新源码已实现 payouts/settledAt、PokerNextHand 持久排期、首次结算延续准备资格，以及到期自动开手，进入部署联调阶段。本文保留对接规则供验收；不是要求重新实现已有功能。最新剩余调整见 [行动特效与离线超时弃牌](POKER_ACTION_EFFECTS_TIMEOUT.md)。
 
 ## 2. 在现有 result 内增加派奖明细
 
@@ -97,7 +97,7 @@ sourceHandId 是本次倒计时对应的刚完成手牌；没有上一手时可 
 5. 没有参过局的新落座者仍需首次 READY 加入连续游戏。离开活动、起身、筹码耗尽的用户不自动加入下一手；筹码到账后主动 READY 可以重新加入。筹码不足的人不阻止其他两名合格玩家继续。
 6. 在线与否不改变已承诺的参局资格，沿用现有断线和行动超时策略；不得为了自动续局在前端替用户发送 READY。
 
-当前 persistHand 中 `seat.ready=false` 是每手结束后必须重新准备的直接原因，需要区分“运行中清理准备显示”和“首次结算恢复继续参局资格”。不要在每次 complete 读取、补到账或 scheduler 扫描时再次写 ready=true。
+原版 persistHand 的逐手 `seat.ready=false` 已通过首次结算恢复参局资格解决。最新源码用 settlementCommitted 区分运行中清理和首次结算恢复。不要在每次 complete 读取、补到账或 scheduler 扫描时再次写 ready=true。
 
 ## 5. 复用结算事务和开手逻辑
 

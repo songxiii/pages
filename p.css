@@ -1116,12 +1116,13 @@ body.room-mode { height:100dvh; min-height:0; }
 .room-mode .seat-name { font-size:10px; line-height:1.25; }
 .room-mode .seat-stack { font-size:12px; }
 .room-mode .seat-position { position:static; padding:0; margin:0; font-size:8px; line-height:1.2; color:#bac2d2; white-space:nowrap; }
-.room-mode .seat-markers { top:-21px; right:-3px; gap:2px; }
-.room-mode .seat-marker { width:19px; height:19px; font-size:8px; }
-.room-mode .dealer-button { font-size:12px; }
+.room-mode .seat-label.has-markers { padding-right:19px; }
+.room-mode .seat-label.dual-markers { padding-bottom:11px; }
+.room-mode .seat-markers { top:14px; right:2px; gap:2px; flex-direction:column; }
+.room-mode .seat-marker { width:14px; height:14px; border-radius:3px; font-size:7px; }
+.room-mode .dealer-button { font-size:10px; }
 .seat-readiness { position:absolute; top:0; right:0; padding:2px 4px; border:1px solid #83cca060; border-radius:7px; color:#b4e8c4; background:#19402ee8; font-size:9px; z-index:6; }
-.room-mode .hole-cards { bottom:39px; }
-.room-mode .seat.self .hole-cards { bottom:39px; }
+.room-mode .hole-cards, .room-mode .seat.self .hole-cards { bottom:calc(100% - var(--seat-size) + 13px); z-index:6; }
 .room-mode .seat.self .card { width:clamp(28px,calc(var(--seat-size) * .72),45px); height:clamp(45px,calc(var(--seat-size) * 1.0),65px); justify-content:flex-start; gap:1px; padding:2px 3px; }
 .room-mode .seat.self .rank { font-size:clamp(17px,4.8vw,23px); line-height:.9; }
 .room-mode .seat.self .suit { font-size:clamp(26px,7.4vw,36px); line-height:.82; }
@@ -1195,7 +1196,31 @@ body.room-mode { height:100dvh; min-height:0; }
 }
 
 .room-mode .hole-cards .card { width:clamp(19px,calc(var(--seat-size) * .60),32px); height:clamp(27px,calc(var(--seat-size) * .83),44px); }
-.room-mode .seat:not(.self) .hole-cards { bottom:18px; }
+.room-mode .seat:not(.self) .hole-cards .card { padding:1px 2px; justify-content:flex-start; gap:0; }
+.room-mode .seat:not(.self) .hole-cards .rank { font-size:clamp(11px,3.3vw,14px); line-height:.9; }
+.room-mode .seat:not(.self) .hole-cards .suit { font-size:clamp(16px,4.5vw,24px); line-height:.75; }
+.room-mode .seat.bottom .seat-bet { top:-16px; left:calc(100% + 4px); transform:none; }
+.room-mode .seat-bet { padding:2px 4px; border-radius:10px; background:#090e18c9; border:1px solid #a8bdde33; z-index:6; font-variant-numeric:tabular-nums; }
+.room-mode .seat-state { position:static; line-height:10px; margin-top:1px; }
+.room-mode .seat.all-in .seat-state { color:#ffe0a0; font-weight:900; letter-spacing:1px; text-shadow:0 0 6px #ff851b; animation:all-in-pulse 1s ease-in-out infinite; }
+.room-mode .seat.all-in .seat-avatar { border-color:#ffac48; box-shadow:0 0 0 2px #ff9b3633,0 0 18px #f7893055; }
+.room-mode .seat.folded .seat-state { color:#d299a0; }
+.room-mode .seat.folding .hole-cards { animation:fold-away .7s ease-out var(--fold-delay,0ms) both; }
+.room-mode .seat.folding .seat-label { animation:fold-flash .7s ease-out var(--fold-delay,0ms) both; }
+.room-mode .seat-win { top:auto; bottom:-13px; }
+.room-mode .turn-seconds { top:calc(var(--seat-size) - 11px); }
+.room-mode .seat.current .seat-position { padding-right:18px; }
+.room-mode .seat[data-urgent="true"] .turn-seconds { background:#d92f49; color:#fff; font-weight:800; animation:turn-heartbeat 1s ease-in-out infinite; }
+.room-mode .seat[data-urgent="true"] .turn-timer span { background:#ff425e; }
+.room-mode .seat[data-urgent="true"] .seat-avatar { border-color:#ff425e; animation:turn-heartbeat 1s ease-in-out infinite; }
+.room-mode .settlement-summary { display:flex; align-items:center; justify-content:center; gap:5px; margin-top:2px; }
+.room-mode .settlement-summary .table-result { flex:1; min-width:0; margin:0; display:block; white-space:nowrap; text-overflow:ellipsis; }
+.room-mode .settlement-summary .table-result:empty { display:none; }
+.room-mode .settlement-summary .next-hand-countdown { flex-shrink:0; margin:0; }
+@keyframes all-in-pulse { 0%,100% { opacity:.8; } 50% { opacity:1; text-shadow:0 0 10px #ff851b,0 0 20px #ff851b88; } }
+@keyframes fold-away { from { opacity:1; transform:translateY(0); } to { opacity:.15; transform:translateY(9px) rotate(-5deg); } }
+@keyframes fold-flash { 30% { border-color:#d36e7d; box-shadow:0 0 10px #ca4f6244; } }
+@keyframes turn-heartbeat { 0%,45%,100% { box-shadow:0 0 0 1px #ff425e55; } 15%,65% { box-shadow:0 0 0 4px #ff425e55,0 0 15px #ff425e66; } }
 
 @media(max-height:650px) {
   body:not(.room-mode) .page-head { height:44px; }

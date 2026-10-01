@@ -4,7 +4,9 @@
 
 最新核对更新：相邻 Java 已补齐 UNREADY/BUY_IN/PAUSE_GAME/RESUME_GAME 的业务与快照授权、带入/暂停字段，以及 UTG 等位置；这些原有缺口进入部署验收阶段。前端保留对只授权 STAND_UP 的旧取消准备快照的兼容。
 
-**本轮新增要求及仍待实现字段见 [赢家派奖与 10 秒自动续局设计](POKER_SETTLEMENT_AUTOPLAY.md)**：result.payouts / settledAt、room.nextHand、每手延续参局资格及服务端到期发牌。首次开始后不用再准备/开始；该新文档的续局及暂停恢复规则优先于下面原版的逐手准备/立即恢复描述。
+**赢家派奖与自动续局已在最新 Java 源码实现，按 [赢家派奖与 10 秒自动续局设计](POKER_SETTLEMENT_AUTOPLAY.md) 部署验收**：result.payouts / settledAt、room.nextHand、每手延续参局资格及服务端到期发牌。首次开始后不用再准备/开始；该新文档的续局及暂停恢复规则优先于下面原版的逐手准备/立即恢复描述。
+
+最新剩余调整见 [行动特效与离线超时弃牌设计](POKER_ACTION_EFFECTS_TIMEOUT.md)：统一超时 fold，以及 allInCommitted 解决全下赢家立即结算时漏提示。无需新增接口。
 
 ## 1. 实现范围
 
@@ -18,7 +20,9 @@
 | 追加带入 | BUY_IN、配置/金额/授权快照已加入 | 部署验收即时和延迟到账、幂等及恢复 |
 | 暂停游戏 | PAUSE_GAME、playState 和授权已加入 | 验收结算边界；新增自动续局排期取消规则 |
 | 继续游戏 | RESUME_GAME 和暂停授权已加入 | 按新设计改为恢复10秒排期，不要求再次准备 |
-| 赢家派奖明细和自动续局 | 当前缺 result.payouts / settledAt 和 room.nextHand | 按独立新文档增加字段和服务端持久调度 |
+| 赢家派奖明细和自动续局 | 已加入 payouts/settledAt/nextHand 和持久调度 | 部署验收金额、十秒排期、连续参局与暂停恢复 |
+| 离线超时一律弃牌 | 已有独立于连接的调度，但免费行动超时仍 check | 按新文档改为统一 fold |
+| 全下立即结算的提示 | allIn 仅以最终 stack==0 判断 | 增加本手持久标志 allInCommitted |
 | 成员头像、累计带入、盈亏 | 已有 avatarUrl/totalBuyIn/netChips | 沿用；第 6 节说明结算盈亏可选调整 |
 | UTG、UTG+1、LJ、HJ、CO | 当前 PokerHand 已补齐 | 沿用 position，部署后核对庄位轮转；旧版本由前端兼容 |
 

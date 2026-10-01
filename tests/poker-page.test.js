@@ -876,12 +876,13 @@ test("结算后起身或换人占座不把旧赢家和底牌显示到新用户�
   sockets[0].receive({ type: "SNAPSHOT", payload: first });
   const player = first.game.players[0];
   const completed = { ...first, revision: 2, self: { ...first.self, seatIndex: null },
-    game: { ...first.game, phase: "complete", result: { winners: [player.seatIndex], hands: ["同花"] } },
+    game: { ...first.game, phase: "complete", players: first.game.players.map((p, i) => ({ ...p, allInCommitted: i === 0, folded: i === 1 })), result: { winners: [player.seatIndex], hands: ["同花"] } },
     roomMembers: [{ userId: "new-user", nickname: "新玩家", seatIndex: player.seatIndex, stack: 200, state: "SEATED" }] };
   sockets[0].receive({ type: "SNAPSHOT", payload: completed });
   const seat = elements["table-seats"].children.find(s => s.attributes["data-seat-index"] === String(player.seatIndex));
   assert.equal(descendants(seat).find(n => n.className === "seat-name").textContent, "新玩家");
   assert.ok(!seat.className.includes(" winner"));
+  assert.ok(!/all-in|folded|folding/.test(seat.className));
   assert.ok(!descendants(seat).some(n => n.className === "hole-cards"));
   assert.equal(elements["payout-layer"].children.length, 0);
   assert.equal(elements["deal-layer"].children.length, 0);
@@ -902,4 +903,74 @@ test("旧服务结算展示十秒不因快照更新重置，暂停及时切换�
   assert.equal(elements["next-hand-countdown"].textContent, "等待服务端开启下一手");
   sockets[0].receive({ type: "SNAPSHOT", payload: { ...complete, revision: 3, room: { ...complete.room, playState: "PAUSED" } } });
   assert.equal(elements["next-hand-countdown"].textContent, "游戏已暂停");
+});
+
+test("摊牌时即使服务误传底牌也不公开弃牌对手，本人仍可看自己的牌", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const first = gameSnapshot();
+  const players = first.game.players.map(p => ({ ...p, folded: true }));
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...first,
+    game: { ...first.game, phase: "complete", players, result: { hands: [null, null] } } } });
+  const seats = elements["table-seats"].children;
+  const mine = descendants(seats[0]).find(n => n.className === "hole-cards");
+  const opponent = descendants(seats[1]).find(n => n.className === "hole-cards");
+  assert.ok(mine.children.every(n => !n.className.includes("back")));
+  assert.ok(opponent.children.every(n => n.className.includes("back")));
+});
+
+test("全下与弃牌状态沿用本手玩家，下注金额展示本轮累计且结算后清除", async () => {
+  let now = Date.now(); class ClockDate extends Date { static now() { return now; } }
+  const { elements, sockets } = mount([roomResponse()], "", { Date: ClockDate });
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const first = gameSnapshot(); sockets[0].receive({ type: "SNAPSHOT", payload: first });
+  const next = { ...first, revision: 2, game: { ...first.game,
+    players: first.game.players.map((p, i) => ({ ...p, folded: i === 1, allIn: i === 0, bet: 200 })) } };
+  sockets[0].receive({ type: "SNAPSHOT", payload: next });
+  let seats = elements["table-seats"].children;
+  assert.ok(seats[0].className.includes(" all-in"));
+  assert.equal(descendants(seats[0]).find(n => n.className === "seat-state").textContent, "ALL IN");
+  assert.ok(seats[1].className.includes(" folding"));
+  assert.equal(descendants(seats[0]).find(n => n.className === "seat-bet").attributes["aria-label"], "本轮下注 200");
+  now += 1000;
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...next, revision: 3 } });
+  assert.ok(!elements["table-seats"].children[1].className.includes(" folding"));
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...next, revision: 4,
+    roomMembers: next.game.players.map(p => ({ ...p, folded: false, allIn: false, stack: 300 })),
+    game: { ...next.game, phase: "complete", players: next.game.players.map(p => ({ ...p, allIn: false })), result: { hands: [] } } } });
+  seats = elements["table-seats"].children;
+  assert.ok(seats[0].className.includes(" all-in"));
+  assert.ok(seats[1].className.includes(" folded"));
+  assert.ok(!descendants(elements["table-seats"]).some(n => n.className === "seat-bet"));
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: 5, game: { ...first.game, handId: "H2" } } });
+  assert.ok(!elements["table-seats"].children.some(s => /all-in|folding|folded/.test(s.className)));
+});
+
+test("全下直接结算通过 allInCommitted 展示特效，不依赖派奖后的余额为零", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const first = gameSnapshot();
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, game: { ...first.game, phase: "complete",
+    players: first.game.players.map((p, i) => ({ ...p, allInCommitted: i === 0, allIn: false, stack: 400 })), result: {} } } });
+  assert.ok(elements["table-seats"].children[0].className.includes(" all-in"));
+  assert.ok(!elements["table-seats"].children[1].className.includes(" all-in"));
+});
+
+test("行动倒计时使用服务器时间，最后十秒标红，离线仍计时但不在客户端伪造弃牌", async () => {
+  let now = Date.now(); class ClockDate extends Date { static now() { return now; } }
+  const { elements, sockets, intervals } = mount([roomResponse()], "", { Date: ClockDate });
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const first = gameSnapshot();
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, serverTime: new Date(now + 60000).toISOString(),
+    game: { ...first.game, turnDeadline: new Date(now + 81000).toISOString(), players: first.game.players.map(p => ({ ...p, online: false })) } } });
+  const mine = elements["table-seats"].children[0];
+  const seconds = descendants(mine).find(n => n.className === "turn-seconds");
+  assert.equal(seconds.textContent, "21s"); assert.equal(mine.attributes["data-urgent"], "false");
+  now += 11000; for (const tick of intervals.values()) tick();
+  assert.equal(seconds.textContent, "10s"); assert.equal(mine.attributes["data-urgent"], "true");
+  now += 10000; for (const tick of intervals.values()) tick();
+  assert.equal(seconds.textContent, "0s");
+  assert.ok(!mine.className.includes(" folded"));
+  assert.ok(!sockets[0].sent.some(f => f.type === "ACTION"));
+  assert.equal(elements["fold-action"].disabled, true);
 });
