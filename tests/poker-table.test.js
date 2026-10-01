@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ownSeat, tableLayout, raisePresets, handPositions, seatIndex, buyInOptions, memberAmounts, seatPositions, roomControls } from "../src/poker-table.js";
+import { ownSeat, tableLayout, raisePresets, handPositions, seatIndex, buyInOptions, memberAmounts, seatPositions, roomControls, handAwards, nextHandState } from "../src/poker-table.js";
 
 test("成员盈亏优先使用服务字段，兼容账本差额，缺失金额不能冒充零", () => {
   assert.deepEqual(memberAmounts({ totalBuyIn: 1000, stack: 800, netChips: 50 }), { totalBuyIn: 1000, netChips: 50 });
@@ -103,4 +103,33 @@ test("取消准备兼容仅授权起身的旧快照，仍拒绝牌局中、权�
   for (const overrides of [{ self: { ...lobby.self, allowedCommands: [] } }, { room: { status: "CLOSED" } },
     { activity: { status: "ENDED" } }, { activity: { status: "CANCELLED" } }, { game: { phase: "flop" } },
     { self: { ...lobby.self, seatIndex: null } }]) assert.equal(roomControls({ ...lobby, ...overrides }).canUnready, false);
+});
+
+test("赢家复用现有座号，单赢家取底池；多赢家不猜分配额，新payouts按用户和座位聚合", () => {
+  const players = [{ userId: "a", seatIndex: 0, nickname: "甲" }, { userId: "b", seatIndex: 4, nickname: "乙" }];
+  const game = { phase: "complete", pot: 300, players, result: { winners: [0] } };
+  assert.deepEqual(handAwards(game), [{ seatIndex: 0, userId: "a", nickname: "甲", amount: 300 }]);
+  assert.deepEqual(handAwards({ ...game, result: { winners: [0, 4] } }).map(a => a.amount), [null, null]);
+  const split = { ...game, result: { winners: [0, 4], payouts: [
+    { userId: "a", seatIndex: 0, amount: 100 }, { userId: "b", seatIndex: 4, amount: 150 }, { userId: "a", amount: 50 },
+    { userId: "unknown", seatIndex: 0, amount: 1000 }, { seatIndex: 4, amount: -1 }, { seatIndex: 4, amount: "200" },
+  ] } };
+  assert.deepEqual(handAwards(split).map(a => [a.seatIndex, a.amount]), [[0, 150], [4, 150]]);
+  assert.deepEqual(handAwards({ ...game, phase: "river" }), []);
+});
+
+test("下一手时间使用服务端截止；暂停、人数不足和过期时间有明确状态，不伪造自动发牌", () => {
+  const now = Date.parse("2026-10-01T01:00:00Z");
+  const game = { handId: "H1", phase: "complete" };
+  const room = { playState: "RUNNING", nextHand: { status: "COUNTDOWN", sourceHandId: "H1", startsAt: "2026-10-01T01:00:10Z" } };
+  assert.equal(nextHandState({ game, room }, now).text, "下一手 · 10s");
+  assert.equal(nextHandState({ game, room }, now + 8000).seconds, 2);
+  assert.equal(nextHandState({ game, room }, now + 10000).text, "正在等待服务端发牌…");
+  assert.equal(nextHandState({ game, room: { ...room, playState: "PAUSED" } }, now).text, "游戏已暂停");
+  assert.equal(nextHandState({ game, room: { nextHand: { status: "WAITING_PLAYERS" } } }, now).text, "等待至少两名可参局玩家");
+  assert.equal(nextHandState({ game: { ...game, phase: "preflop" }, room }, now).visible, false);
+  assert.equal(nextHandState({ game: { ...game, handId: "H2" }, room }, now).visible, false);
+  assert.equal(nextHandState({ game, room: { status: "CLOSED" } }, now).visible, false);
+  assert.equal(nextHandState({ game }, now, now + 10000).text, "结算展示 · 10s");
+  assert.equal(nextHandState({ game }, now + 10000, now + 10000).text, "等待服务端开启下一手");
 });

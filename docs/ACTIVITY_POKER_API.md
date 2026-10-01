@@ -6,7 +6,7 @@
 
 Java 的当前鉴权口径为 **ticket-only**：entry/rooms 不需要 Authorization，身份来自服务端校验的 ticket。数据库需新增 `poker_activity_state/poker_activity_command`；牌局加密默认从已有 `POKER_WS_SECRET` 派生，无需增加密钥配置，`POKER_STATE_KEY` 是可选优先覆盖。外部 `seatIndex` 从 0 开始，数据库 `seat_no` 保持 1 起；Java 早期设计稿中的 `SET_READY/PLAYER_ACTION/commandId/actionId` 和增量事件不用于此页面。
 
-后端待实现功能的独立交付文档见 [Java 后端待实现接口设计](POKER_BACKEND_TODO.md)，含命令、字段、事务顺序和验收用例。
+原有新命令的设计与验收见 [Java 后端接口设计](POKER_BACKEND_TODO.md)。**最新赢家派奖与每手结束后 10 秒自动续局设计见 [POKER_SETTLEMENT_AUTOPLAY.md](POKER_SETTLEMENT_AUTOPLAY.md)**；首次准备/开始后连续进行，后续不再要求准备或房主再次开始。
 
 ## 1. 活动入口和开房（沿用）
 
@@ -65,7 +65,7 @@ Java 已确认 entry/rooms 只要求请求体 ticket，票据允许转发，接�
 
 ### 房间成员金额展示
 
-成员列表使用 `roomMembers[].avatarUrl/nickname/state/seatIndex/online/totalBuyIn/netChips`，当前 Java 视图已提供这些字段，不需要新增查询接口。头像为 30px，缺失、非法地址或加载失败时显示昵称首字。右侧 `netChips > 0` 显示红色「+金额」，小于零显示绿色「-金额」，等于零使用默认字体颜色显示 `0`；下方显示「累计带入 totalBuyIn」。每次完整 SNAPSHOT 同步刷新。
+成员列表使用 `roomMembers[].avatarUrl/nickname/state/online/stack/totalBuyIn/netChips`，当前 Java 视图已提供这些字段，不需要新增查询接口。头像为 30px，缺失、非法地址或加载失败时显示昵称首字。右侧 `netChips > 0` 显示红色「+金额」，小于零显示绿色「-金额」，等于零使用默认字体颜色显示 `0`；同时显示「当前筹码 stack」和「累计带入 totalBuyIn」。每次完整 SNAPSHOT 同步刷新。
 
 缺失 `netChips` 时，仅在 `stack` 与 `totalBuyIn` 都有效时用两者差额兼容；金额缺失显示 `—`，不能误报零。累计带入只包含已到账金额，未结算的 `pendingBuyIn` 不混入。当前 Java 的 `netChips = stack - totalBuyIn` 是实时账面差额，手牌中已下注但未分配的底池会暂时体现为负数；若产品需要仅统计已完成手牌，Java 应将 `netChips` 改为结算后账本差额，并在下注期间保持上手结果，前端直接使用该值。
 
@@ -163,7 +163,7 @@ Java 校验 token 所属用户、活动和房间后，依次发送 `AUTH_OK` 与
 
 前端从当前完整 `roomMembers` 计算实际有效座位数量，排除旁观/起身、空座和重复座位，不仅信任 counts.seatedCount。人数不足 2、当前手未结束或已申请暂停时，开始按钮禁用；普通成员永远没有此控制。
 
-用户此前要求至少两人落座才能开始；当前补充要求是：如果保留准备机制，牌桌要显示准备状态并提供取消准备。当前 Java 要求至少两名已准备且有筹码的成员，前端兼容此规则，显示准备人数与座位“已准备”标记。若服务改为两人落座直接开局，可以不再授权 READY/UNREADY；若保留准备机制，则必须在已准备快照中授权 UNREADY；目前前端兼容允许 STAND_UP 的未开局快照发送取消。最终 START_HAND 始终以服务端授权和校验为准。成功后由 Java 发牌并广播 SNAPSHOT，前端不自行开手。
+用户此前要求至少两人落座才能开始；当前补充要求是：如果保留准备机制，牌桌要显示准备状态并提供取消准备。当前 Java 开手要求至少两名已准备且有筹码的成员；首次启动兼容此规则，显示准备人数与座位“已准备”标记。后续连续游戏需按新文档在结算事务中延续资格并由服务器10秒后自动开局，不能每手要求再次准备。若服务改为两人落座直接开局，可以不再授权 READY/UNREADY；若保留准备机制，则必须在已准备快照中授权 UNREADY；目前前端兼容允许 STAND_UP 的未开局快照发送取消。最终 START_HAND 始终以服务端授权和校验为准。成功后由 Java 发牌并广播 SNAPSHOT，前端不自行开手。
 
 ### 暂停与继续（需要 Java 新增）
 
@@ -184,7 +184,7 @@ Java 校验 token 所属用户、活动和房间后，依次发送 `AUTH_OK` 与
 4. PAUSED 仅向房主提供 RESUME_GAME，且仍需至少两名有有效座位及筹码的玩家。继续后设 RUNNING，并按服务端流程恢复下一手；当前前端不会自己发牌或假装暂停。
 5. 普通成员提交 PAUSE_GAME/RESUME_GAME/START_HAND 必须拒绝；请求幂等、revision、事务和跨实例传播沿用现有机制。
 
-本轮核对相邻 Java 已加入 PAUSE_GAME/RESUME_GAME 业务处理，但读取的视图仍未返回 room.playState 或新管理授权，需要同步补齐快照并验收。
+最新相邻 Java 已加入 PAUSE_GAME/RESUME_GAME 业务与视图授权、room.playState。按本轮自动续局要求，还需在暂停时取消下一手排期、继续时恢复排期，详见独立新文档。
 
 ### 起身确认
 
@@ -220,7 +220,7 @@ Java 校验 token 所属用户、活动和房间后，依次发送 `AUTH_OK` 与
 3. 校验现有 SIT_DOWN、READY、STAND_UP、START_HAND、ACTION；核对自选与随机房间落座、当前准备/开局规则，并新增 UNREADY/BUY_IN（第 5 节）、PAUSE_GAME/RESUME_GAME 与 room.playState，成功发新快照，失败发 ERROR。
 4. 提供 PONG、turnDeadline、关房与认证过期事件，并让服务器处理行动超时、断线与下注幂等。
 
-原有活动 v1 命令已在 Java 实现并有规则、JDBC 事务及 WS 回包测试；前端已兼容现有 Java 的落座及生命周期 payload；取消准备、追加带入、暂停与继续的业务命令已在最新 Java 源码加入，快照字段与授权仍需补齐，之后部署并用真实活动验证。在线人数目前只统计本实例连接；跨实例牌局通过数据库 revision 轮询更新，在线人数租约仍属后续。结算画面可保留；有人起身/换座后 Java 返回 game=null，避免旧玩家占据空座，服务端仍保留下一手手数与庄家轮换。
+原有活动 v1 命令已在 Java 实现并有规则、JDBC 事务及 WS 回包测试；前端已兼容现有 Java 的落座及生命周期 payload；取消准备、追加带入、暂停与继续的业务及快照授权已在最新 Java 源码补齐，需部署并用真实活动验证；本轮新增派奖明细与自动续局仍待实现。在线人数目前只统计本实例连接；跨实例牌局通过数据库 revision 轮询更新，在线人数租约仍属后续。结算画面可保留；有人起身/换座后 Java 返回 game=null，避免旧玩家占据空座，服务端仍保留下一手手数与庄家轮换。
 
 
 ## 5. 本次新增需求：取消准备、带入筹码及当前后端缺口
@@ -230,9 +230,9 @@ Java 校验 token 所属用户、活动和房间后，依次发送 `AUTH_OK` 与
 | 项目 | 当前 Java | 本次前端 |
 |---|---|---|
 | READY 与准备状态 | 已实现，成员含 ready/state | 座位头像旁显示“已准备”，菜单显示准备人数 |
-| UNREADY 取消准备 | 业务已加入，视图未授权 | 菜单入口及空 payload 已接入，兼容 STAND_UP 授权 |
-| BUY_IN 追加带入 | 业务已加入，金额配置/待到账/授权快照待补齐 | 菜单下拉、当前余额、待到账金额已接入 |
-| PAUSE_GAME / RESUME_GAME | 业务已加入，视图缺 room.playState 和授权 | 现有入口待完整快照与授权 |
+| UNREADY 取消准备 | 业务与视图已加入 | 菜单入口及空 payload 已接入，兼容 STAND_UP 授权 |
+| BUY_IN 追加带入 | 业务、金额配置/待到账/授权快照已加入 | 菜单下拉、当前余额、待到账金额已接入 |
+| PAUSE_GAME / RESUME_GAME | 业务、room.playState 和授权已加入 | 现有入口已对接，自动续局排期规则需按新设计更新 |
 | 起身确认、短屏一屏、连接静默重试 | 无需新增接口 | 页面确认动画；竖屏动态高度/座位；网络失败只显示状态，最多自动重试 3 次 |
 
 ### 5.1 取消准备
@@ -282,3 +282,10 @@ Java 校验 token 所属用户、活动和房间后，依次发送 `AUTH_OK` 与
 连接 onerror、onclose、认证/快照超时仅更新顶部状态、牌桌提示和菜单连接说明，不弹异常框。自动重试使用 1.5/3/6 秒退避，重新取入口凭证再认证；后台入口网络/5xx失败保持现有牌桌并继续重试，3 次失败后保留手动重连。业务 ERROR、AUTH_EXPIRED 与接口业务异常仍可查看脱敏请求/返回详情。
 
 右上角已移除问号和全屏按钮。牌桌仅使用竖屏布局，按可用浏览器高度压缩，保持本人在底部；底部不平铺快捷加注，点击加注才打开金额浮层；快捷金额、拖动及全下只选择金额，最后确认提交，不把操作区推到屏幕外。房间配置、成员和连接信息放在菜单折叠详情中。
+
+
+## 6. 赢家、派奖动画与 10 秒自动续局
+
+复用 game.result.winners 和 game.pot 标记赢家、播放底池筹码飞向赢家；每次手牌首次结算播放一次，重复快照和重连不重放。赢家座位显示获胜及实际奖额，中央显示赢家昵称。单赢家旧协议金额复用 finalPot，多赢家必须由新增 result.payouts 返回实际分配，不能平均猜测。牌面数字和花色放大并靠上排列；成员菜单显示已有 roomMembers.stack。
+
+完整协议、持久字段、延续参局资格、startHand/定时扫描复用方式与验收用例见 [赢家派奖与每手结束后10秒自动续局设计](POKER_SETTLEMENT_AUTOPLAY.md)。前端已接 room.nextHand.status/startsAt/sourceHandId 和 serverTime；COUNTDOWN 时显示剩余秒数，0秒等待新 handId 的快照并直接进入下一手，不发送 READY/START_HAND。原版Java暂无自动续局调度时，仅展示结算10秒后等待服务端，自动续局需后端实现后才能生效。

@@ -1122,15 +1122,30 @@ body.room-mode { height:100dvh; min-height:0; }
 .seat-readiness { position:absolute; top:0; right:0; padding:2px 4px; border:1px solid #83cca060; border-radius:7px; color:#b4e8c4; background:#19402ee8; font-size:9px; z-index:6; }
 .room-mode .hole-cards { bottom:39px; }
 .room-mode .seat.self .hole-cards { bottom:39px; }
-.room-mode .seat.self .card { width:clamp(28px,calc(var(--seat-size) * .72),45px); height:clamp(39px,calc(var(--seat-size) * 1.0),62px); }
-.room-mode .seat.self .rank { font-size:16px; }
-.room-mode .seat.self .suit { font-size:25px; }
+.room-mode .seat.self .card { width:clamp(28px,calc(var(--seat-size) * .72),45px); height:clamp(45px,calc(var(--seat-size) * 1.0),65px); justify-content:flex-start; gap:1px; padding:2px 3px; }
+.room-mode .seat.self .rank { font-size:clamp(17px,4.8vw,23px); line-height:.9; }
+.room-mode .seat.self .suit { font-size:clamp(26px,7.4vw,36px); line-height:.82; }
 .room-mode .table-center { top:37%; left:24%; width:52%; }
 .room-mode .table-blinds { margin-bottom:6px; }
 .room-mode .board-cards { margin-bottom:6px; min-height:0; gap:3px; }
-.room-mode .board-cards .card { width:calc((100% - 12px) / 5); max-width:44px; height:auto; aspect-ratio:0.68; flex-shrink:0; padding:3px; }
-.room-mode .board-cards .rank { font-size:clamp(13px,3.7vw,17px); }
-.room-mode .board-cards .suit { font-size:clamp(23px,6.6vw,31px); }
+.room-mode .board-cards .card { width:calc((100% - 12px) / 5); max-width:44px; height:auto; aspect-ratio:0.68; flex-shrink:0; padding:2px; justify-content:flex-start; gap:1px; }
+.room-mode .board-cards .rank { font-size:clamp(16px,4.6vw,21px); line-height:.9; }
+.room-mode .board-cards .suit { font-size:clamp(25px,7.5vw,35px); line-height:.82; }
+.room-mode .table-result { color:var(--gold); font-size:11px; line-height:1.35; margin:4px 0 0; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; overflow-wrap:anywhere; }
+.next-hand-countdown { margin:4px 0 0; color:#f1dda8; font-size:11px; line-height:1.3; font-variant-numeric:tabular-nums; }
+.member-profile .member-stack { color:#e4cea2; }
+.seat.winner .seat-avatar { border-color:var(--gold); box-shadow:0 0 12px #e7c68b80; }
+.seat.winner .seat-label { border-color:var(--gold); }
+.seat-win { position:absolute; top:-13px; left:50%; transform:translateX(-50%); max-width:110%; padding:2px 5px; border-radius:6px; background:#e7c68b; color:#332719; font-size:9px; line-height:1.2; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; z-index:7; }
+.payout-layer { position:absolute; inset:0; pointer-events:none; z-index:8; overflow:hidden; }
+.payout-chip { position:absolute; left:var(--start-x); top:var(--start-y); opacity:0; animation:pot-to-winner .72s cubic-bezier(.25,.7,.35,1) var(--delay) both; }
+@keyframes pot-to-winner {
+  0% { opacity:0; transform:translate(-50%,-50%) scale(.65); }
+  12% { opacity:1; }
+  85% { opacity:1; }
+  100% { opacity:0; transform:translate(calc(-50% + var(--dx)),calc(-50% + var(--dy))) scale(.55); }
+}
+@media(prefers-reduced-motion:reduce) { .payout-layer { display:none; } }
 .room-mode .table-phase { margin-top:6px; }
 .room-mode .table-result { margin:3px 0; line-height:1.3; }
 .room-mode .table-notice { flex-shrink:0; font-size:10px; line-height:1.5; min-height:16px; margin-top:0; }
@@ -1169,8 +1184,14 @@ body.room-mode { height:100dvh; min-height:0; }
   .room-mode .page-head { height:40px; }
   .room-mode .table-action { height:39px; }
   .room-mode .raise-presets button { min-height:31px; }
+  .room-mode .table-blinds { margin-bottom:4px; }
+  .room-mode .board-cards { margin-bottom:4px; }
   .room-mode .pot-box { padding:3px 8px; }
-  .room-mode .pot-box strong { font-size:16px; }
+  .room-mode .pot-box small { line-height:1.1; }
+  .room-mode .pot-box strong { font-size:16px; line-height:1.1; }
+  .room-mode .table-phase { margin-top:2px; font-size:9px; line-height:1.2; }
+  .room-mode .table-result { margin:2px 0; font-size:10px; line-height:1.2; -webkit-line-clamp:1; }
+  .room-mode .next-hand-countdown { margin-top:2px; font-size:10px; line-height:1.2; }
   .room-mode .table-center { top:37%; }
 }
 

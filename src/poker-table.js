@@ -113,6 +113,7 @@ export function roomControls(view) {
   const inHand = Boolean(view.game && view.game.phase !== "complete");
   const playState = view.room?.playState || (view.room?.status === "PAUSED" ? "PAUSED" : inHand || view.room?.status === "PLAYING" ? "RUNNING" : "WAITING");
   const paused = playState === "PAUSED", pausePending = playState === "PAUSE_PENDING";
+  const autoContinuing = playState === "RUNNING" && ["COUNTDOWN", "WAITING_PLAYERS"].includes(view.room?.nextHand?.status);
   const allowed = Array.isArray(view.self?.allowedCommands) ? view.self.allowedCommands : [];
   // Older snapshots omit command capabilities. Java still validates the request.
   const canSit = own === null && (Array.isArray(view.self?.allowedCommands) ? allowed.includes("SIT_DOWN")
@@ -120,7 +121,7 @@ export function roomControls(view) {
   const member = members.find((member) => identity(member) != null && String(identity(member)) === String(identity(view.self)));
   const ready = own !== null && playerReady(view, member || { ...view.self, state: view.self?.roomState });
   const readyCount = members.filter((m) => seatIndex(m) !== null && playerReady(view, m)).length;
-  return { host, seatedCount: seated.length, readyCount, seated: own !== null, ready, inHand, paused, pausePending,
+  return { host, seatedCount: seated.length, readyCount, seated: own !== null, ready, inHand, paused, pausePending, autoContinuing,
     canSit,
     canStand: own !== null && allowed.includes("STAND_UP"),
     canReady: own !== null && !inHand && !ready && allowed.includes("READY"),
@@ -130,7 +131,7 @@ export function roomControls(view) {
       && !["ENDED", "CANCELLED"].includes(view.activity?.status)
       && (allowed.includes("UNREADY") || allowed.includes("STAND_UP")),
     canBuyIn: allowed.includes("BUY_IN") && buyInOptions(view).length > 0,
-    canStart: host && seated.length >= 2 && !inHand && !paused && !pausePending && allowed.includes("START_HAND"),
+    canStart: host && seated.length >= 2 && !inHand && !paused && !pausePending && !autoContinuing && allowed.includes("START_HAND"),
     canPause: host && !paused && !pausePending && (inHand || playState === "RUNNING") && allowed.includes("PAUSE_GAME"),
     canResume: host && paused && !inHand && seated.length >= 2 && allowed.includes("RESUME_GAME"),
   };
@@ -141,6 +142,51 @@ export function memberAmounts(member) {
   const totalBuyIn = amount(member.totalBuyIn), stack = amount(member.stack);
   return { totalBuyIn, netChips: amount(member.netChips) ?? (totalBuyIn !== null && stack !== null ? stack - totalBuyIn : null) };
 }
+// Existing Java supplies winner seats and final pot. Never guess unequal side-pot splits.
+export function handAwards(game) {
+  if (game?.phase !== "complete") return [];
+  const players = game.players || [], awards = new Map();
+  const validSeat = (value) => value != null && Number.isInteger(Number(value)) && Number(value) >= 0 && Number(value) < 9;
+  for (const payout of Array.isArray(game.result?.payouts) ? game.result.payouts : []) {
+    const player = payout.userId != null ? players.find((p) => String(identity(p)) === String(payout.userId))
+      : players.find((p) => validSeat(payout.seatIndex) && Number(seatIndex(p)) === Number(payout.seatIndex));
+    if (payout.userId != null && !player) continue;
+    const seat = player ? seatIndex(player) : payout.seatIndex;
+    if (!validSeat(seat) || !Number.isSafeInteger(payout.amount) || payout.amount <= 0) continue;
+    const previous = awards.get(Number(seat));
+    const amount = (previous?.amount || 0) + payout.amount;
+    if (!Number.isSafeInteger(amount)) continue;
+    awards.set(Number(seat), { seatIndex: Number(seat), userId: payout.userId ?? identity(player), nickname: player?.nickname || "玩家", amount });
+  }
+  for (const seat of Array.isArray(game.result?.winners) ? game.result.winners : []) {
+    if (!validSeat(seat) || awards.has(Number(seat))) continue;
+    const player = players.find((p) => Number(seatIndex(p)) === Number(seat));
+    awards.set(Number(seat), { seatIndex: Number(seat), userId: identity(player), nickname: player?.nickname || "玩家", amount: null });
+  }
+  if (awards.size === 1 && !Array.isArray(game.result?.payouts) && Number.isSafeInteger(game.pot) && game.pot > 0) {
+    awards.values().next().value.amount = game.pot;
+  }
+  return [...awards.values()];
+}
+export function nextHandState(view, now, fallbackDeadline = null) {
+  const status = view.room?.nextHand?.status;
+  if (view.game && view.room?.nextHand?.sourceHandId != null && String(view.room.nextHand.sourceHandId) !== String(view.game.handId)) return { visible: false };
+  if (view.room?.status === "CLOSED" || ["ENDED", "CANCELLED"].includes(view.activity?.status)) return { visible: false };
+  if (view.game && view.game.phase !== "complete") return { visible: false };
+  if (view.room?.playState === "PAUSED" || view.room?.playState === "PAUSE_PENDING" || status === "PAUSED") return { visible: true, text: "游戏已暂停" };
+  if (status === "WAITING_PLAYERS") return { visible: true, text: "等待至少两名可参局玩家" };
+  if (status === "COUNTDOWN") {
+    const deadline = Date.parse(view.room.nextHand.startsAt);
+    if (Number.isFinite(deadline)) {
+      const seconds = Math.max(0, Math.ceil((deadline - now) / 1000));
+      return { visible: true, seconds, text: seconds ? "下一手 · " + seconds + "s" : "正在等待服务端发牌…" };
+    }
+    return { visible: true, text: "正在同步下一手时间…" };
+  }
+  if (view.game?.phase !== "complete" || fallbackDeadline === null) return { visible: false };
+  const seconds = Math.max(0, Math.ceil((fallbackDeadline - now) / 1000));
+  return { visible: true, seconds, text: seconds ? "结算展示 · " + seconds + "s" : "等待服务端开启下一手" };
+}
 export function safeAvatar(url) {
   try { const parsed = new URL(url); return ["https:", "http:"].includes(parsed.protocol) ? parsed.href : null; }
   catch { return null; }
@@ -150,6 +196,9 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
   let view = {}, game = null, connected = false, pending = false, pendingTimer = null;
   let lastHand = null, lastBoard = [], timer = null, deadline = null, currentTimer = null, currentSeconds = null;
   let lastLayoutKey = null, dealCleanupTimer = null;
+  let activeHandSeen = null, lastPaidHand = null, payoutCleanupTimer = null, nextHandTimer = null;
+  let fallbackHand = null, fallbackDeadline = null, serverOffset = 0;
+  let avatarTargets = new Map();
   let seatButtons = [], openSeats = new Set();
   let standConfirmOpen = false;
   function currentLayout() {
@@ -257,7 +306,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     $("buy-in-detail").textContent = !controls.canBuyIn ? "当前房间暂未开放带入筹码。"
       : pendingBuyIn > 0 ? "带入已确认，本局结算后到账。可继续追加。"
       : controls.inHand ? "本局中追加的筹码将在本局结束后到账。" : "追加筹码将在确认后立即到账。";
-    $("start-hand").hidden = !controls.host || controls.paused;
+    $("start-hand").hidden = !controls.host || controls.paused || controls.autoContinuing;
     $("start-hand").disabled = !enabledControl || !controls.canStart;
     $("pause-game").hidden = !controls.host || controls.paused;
     $("pause-game").disabled = !enabledControl || !controls.canPause;
@@ -267,7 +316,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     $("host-control-detail").textContent = controls.pausePending ? "当前这手继续进行，结算完成后暂停，不再发下一手。"
       : controls.paused ? (controls.seatedCount < 2 ? "游戏已暂停，至少 2 人落座后可继续。" : "游戏已暂停，继续后恢复发牌。")
       : controls.seatedCount < 2 ? "至少需要 2 人落座，目前 " + controls.seatedCount + " 人。"
-      : controls.inHand ? "牌局进行中，暂停会在本局结束后生效。" : controls.canStart ? "已有 " + controls.seatedCount + " 人落座，可以开始游戏。" : "已落座 " + controls.seatedCount + " 人，已准备 " + controls.readyCount + " 人，等待开局条件满足。";
+      : controls.inHand ? "牌局进行中，暂停会在本局结束后生效。" : controls.autoContinuing ? "每手结算后 10 秒自动继续，无需重新准备或开始。" : controls.canStart ? "已有 " + controls.seatedCount + " 人落座，可以开始游戏。" : "已落座 " + controls.seatedCount + " 人，已准备 " + controls.readyCount + " 人，等待开局条件满足。";
     $("play-state-notice").hidden = !controls.paused && !controls.pausePending;
     $("play-state-notice").textContent = controls.paused ? "游戏已暂停 · 等待房主继续" : "房主已申请暂停 · 本局结束后生效";
   }
@@ -299,6 +348,12 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     currentSeconds.textContent = seconds + "s";
     if (!seconds) { connected = false; updateActions(); $("table-notice").textContent = "行动时间已到，等待服务端更新…"; }
   }
+  function updateNextHandClock() {
+    const state = nextHandState(view, Date.now() + serverOffset, fallbackDeadline);
+    $("next-hand-countdown").hidden = !state.visible;
+    $("next-hand-countdown").textContent = state.text || "";
+    $("next-hand-countdown").setAttribute("data-seconds", state.seconds == null ? "" : String(state.seconds));
+  }
   function render(nextView) {
     view = nextView; game = view.game || null; pending = false; clearTimeout(pendingTimer);
     const settings = view.room?.settings || {};
@@ -309,24 +364,41 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     const members = view.roomMembers || [];
     const handKey = game?.handId ?? game?.handNumber ?? null;
     const newHand = handKey !== null && handKey !== lastHand;
+    const serverTime = Date.parse(view.serverTime || "");
+    serverOffset = Number.isFinite(serverTime) ? serverTime - Date.now() : 0;
+    const awards = handAwards(game);
+    if (game && game.phase !== "complete") activeHandSeen = handKey;
+    if (game?.phase === "complete" && handKey !== fallbackHand) {
+      fallbackHand = handKey;
+      const settledAt = Date.parse(game.result?.settledAt || "");
+      fallbackDeadline = (Number.isFinite(settledAt) ? settledAt : Date.now() + serverOffset) + 10000;
+    }
+    if (!game || game.phase !== "complete") { fallbackHand = null; fallbackDeadline = null; }
     const layout = currentLayout();
     const roles = handPositions(game);
     const positions = seatPositions(game);
     const layoutKey = layout.length + ":" + selfSeat;
     if (layoutKey !== lastLayoutKey) {
       clearTimeout(dealCleanupTimer); $("deal-layer").replaceChildren(); lastLayoutKey = layoutKey;
+      clearTimeout(payoutCleanupTimer); $("payout-layer").replaceChildren();
     }
+    if (game?.phase === "complete") { clearTimeout(dealCleanupTimer); $("deal-layer").replaceChildren(); }
+    if (!game || newHand || game.phase !== "complete") { clearTimeout(payoutCleanupTimer); $("payout-layer").replaceChildren(); }
     $("table-stage").setAttribute("data-seat-count", String(layout.length));
     const seats = $("table-seats"); seats.replaceChildren();
     seatButtons = []; openSeats = new Set();
+    avatarTargets = new Map();
     currentTimer = null; currentSeconds = null;
     for (const place of layout) {
       const player = players.find((p) => p.seatIndex === place.seatIndex);
       const member = members.find((m) => Number(seatIndex(m)) === place.seatIndex && seatIndex(m) !== null);
-      const person = game?.phase === "complete" ? member || player : player || member;
+      const person = game?.phase === "complete" ? (Array.isArray(view.roomMembers) ? member : player) : player || member;
       const mine = selfSeat === place.seatIndex;
       const current = game?.turn === place.seatIndex && game?.phase !== "complete";
+      const award = person && awards.find((item) => item.seatIndex === place.seatIndex
+        && (item.userId == null || identity(person) == null || String(item.userId) === String(identity(person))));
       const el = node(person ? "div" : "button", "seat" + (!person ? " empty" : "") + (mine ? " self" : "")
+        + (award ? " winner" : "")
         + (current ? " current" : "") + (person?.folded ? " folded" : "") + (person?.online === false ? " offline" : "")
         + (place.x > 50 ? " right" : "") + (place.y < 25 ? " top" : "") + (place.y > 85 ? " bottom" : ""));
       el.setAttribute("data-seat-index", String(place.seatIndex));
@@ -338,6 +410,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
       el.style.setProperty("--x", place.x + "%"); el.style.setProperty("--y", place.y + "%"); el.style.setProperty("--hue", String((place.seatIndex * 59 + 220) % 360));
       const name = person?.nickname || person?.name || member?.nickname || (mine ? view.self?.nickname : null) || "玩家";
       const avatar = node("div", "seat-avatar"); avatar.append(node("span", "avatar-monogram", person ? [...name][0] : "+"));
+      if (award) avatarTargets.set(place.seatIndex, avatar);
       const avatarUrl = safeAvatar(person?.avatarUrl || member?.avatarUrl || (mine ? view.self?.avatarUrl : null));
       if (avatarUrl) { const img = node("img", ""); img.src = avatarUrl; img.alt = ""; img.referrerPolicy = "no-referrer"; img.addEventListener("error", () => img.remove()); avatar.append(img); }
       const label = node("div", "seat-label");
@@ -354,8 +427,13 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
       }
       if (markers.children.length) label.append(markers);
       el.append(avatar);
+      if (award) {
+        const badge = node("span", "seat-win", award.amount === null ? "获胜" : "获胜 +" + formatChips(award.amount));
+        badge.setAttribute("title", name + " " + badge.textContent); el.append(badge);
+      }
       if (person && playerReady(view, member || person)) el.append(node("span", "seat-readiness", "已准备"));
-      if (player?.hole?.length) {
+      const sameParticipant = !person || !player || identity(person) == null || identity(player) == null || String(identity(person)) === String(identity(player));
+      if (person && player?.hole?.length && (game.phase !== "complete" || sameParticipant)) {
         const hole = node("div", "hole-cards");
         // Never reveal another player's hole cards before an explicit showdown.
         const visible = mine || (game.phase === "complete" && Boolean(game.result?.hands));
@@ -375,8 +453,10 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     }
     $("table-blinds").textContent = "NLHE " + formatChips(settings.smallBlind) + " / " + formatChips(settings.bigBlind);
     $("table-pot").textContent = formatChips(game?.pot ?? 0);
+    $("pot-label").textContent = awards.length ? "已分配底池" : "底池";
     $("table-phase").textContent = game ? "第 " + (game.handNumber ?? "—") + " 手 · " + (PHASE_NAMES[game.phase] || "牌局进行中") : "等待开局";
-    $("table-result").textContent = game?.result?.message || "";
+    $("table-result").textContent = awards.length ? awards.map((award) => award.nickname + (award.amount === null ? "" : " +" + formatChips(award.amount))).join("、") + " 获胜" : game?.result?.message || "";
+    $("table-result").setAttribute("title", $("table-result").textContent);
     $("table-notice").textContent = !connected ? "正在同步牌局…" : roomControls(view).paused ? "游戏已暂停，等待房主继续"
       : !game ? (selfSeat === null ? (Number(settings.seatingType) === 0 ? "点击任意空座随机落座，由房主开始游戏" : "点击虚线空座落座，由房主开始游戏") : "已入座，等待房主开始游戏")
       : selfSeat === null ? "你正在旁观本场牌局" : canAct() ? "轮到你行动" : game.phase === "complete" ? "本局结束，等待下一手" : "等待其他玩家行动";
@@ -384,8 +464,34 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     if (currentSeconds) currentSeconds.hidden = !Number.isFinite(deadline);
     clearInterval(timer); updateClock();
     if (currentTimer && Number.isFinite(deadline)) timer = setInterval(updateClock, 1000);
-    if (newHand) animateDeal(layout.filter((p) => players.find((player) => player.seatIndex === p.seatIndex && player.hole?.length)));
+    if (newHand && game?.phase !== "complete") animateDeal(layout.filter((p) => players.find((player) => player.seatIndex === p.seatIndex && player.hole?.length)));
     lastHand = handKey; lastBoard = [...cards]; updateActions(); resize();
+    clearInterval(nextHandTimer); updateNextHandClock();
+    if (game?.phase === "complete" || view.room?.nextHand?.status === "COUNTDOWN") nextHandTimer = setInterval(updateNextHandClock, 250);
+    if (game?.phase === "complete" && handKey !== null && activeHandSeen === handKey && lastPaidHand !== handKey && awards.length) {
+      lastPaidHand = handKey; animatePayout(awards);
+    }
+  }
+  function animatePayout(awards) {
+    clearTimeout(payoutCleanupTimer);
+    const layer = $("payout-layer"); layer.replaceChildren();
+    const stage = $("table-stage").getBoundingClientRect(), pot = $("table-pot").getBoundingClientRect();
+    const startX = pot.left + pot.width / 2 - stage.left, startY = pot.top + pot.height / 2 - stage.top;
+    awards.forEach((award, winnerIndex) => {
+      const avatar = avatarTargets.get(award.seatIndex);
+      if (!avatar) return;
+      const target = avatar.getBoundingClientRect();
+      for (let i = 0; i < 6; i++) {
+        const chip = node("span", "payout-chip chip");
+        chip.setAttribute("data-winner-seat", String(award.seatIndex));
+        chip.style.setProperty("--start-x", startX + "px"); chip.style.setProperty("--start-y", startY + "px");
+        chip.style.setProperty("--dx", target.left + target.width / 2 - stage.left - startX + "px");
+        chip.style.setProperty("--dy", target.top + target.height / 2 - stage.top - startY + "px");
+        chip.style.setProperty("--delay", winnerIndex * 90 + i * 65 + "ms");
+        chip.addEventListener("animationend", () => chip.remove()); layer.append(chip);
+      }
+    });
+    payoutCleanupTimer = setTimeout(() => layer.replaceChildren(), 2400);
   }
   function animateDeal(layout) {
     clearTimeout(dealCleanupTimer);
@@ -430,6 +536,9 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     resize,
     setConnected(value, notice) { connected = value; updateActions(); if (notice) $("table-notice").textContent = notice; },
     reject(message) { clearTimeout(pendingTimer); pending = false; updateActions(); $("table-notice").textContent = message; },
-    reset() { clearInterval(timer); clearTimeout(pendingTimer); clearTimeout(dealCleanupTimer); $("deal-layer").replaceChildren(); lastLayoutKey = null; lastHand = null; lastBoard = []; connected = false; pending = false; updateActions(); },
+    reset() { clearInterval(timer); clearInterval(nextHandTimer); clearTimeout(pendingTimer); clearTimeout(dealCleanupTimer); clearTimeout(payoutCleanupTimer);
+      $("deal-layer").replaceChildren(); $("payout-layer").replaceChildren(); $("next-hand-countdown").hidden = true;
+      lastLayoutKey = null; lastHand = null; lastBoard = []; activeHandSeen = null; lastPaidHand = null; fallbackHand = null; fallbackDeadline = null;
+      connected = false; pending = false; updateActions(); },
   };
 }

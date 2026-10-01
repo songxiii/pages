@@ -13,6 +13,7 @@ function element() {
     value: "", textContent: "", hidden: true, disabled: false, className: "", children: [],
     listeners: {}, attributes: {}, clientWidth: 400, clientHeight: 650,
     style: { values: {}, setProperty(name, value) { this.values[name] = value; } },
+    getBoundingClientRect() { return { left: 0, top: 0, width: this.clientWidth, height: this.clientHeight }; },
     classList: { toggle() {} },
     setAttribute(name, value) { this.attributes[name] = value; },
     getAttribute(name) { return this.attributes[name]; },
@@ -74,7 +75,7 @@ function mount(responses, initialToken = "", options = {}) {
       return { status: next.status, ok: next.status >= 200 && next.status < 300,
         text: async () => next.raw ?? JSON.stringify(next.body) };
     },
-    AbortController, URL, URLSearchParams, Date, JSON,
+    AbortController, URL, URLSearchParams, Date: options.Date || Date, JSON,
     setTimeout(fn) { const id = ++timerId; timeouts.set(id, fn); return id; },
     clearTimeout(id) { timeouts.delete(id); },
     setInterval(fn) { const id = ++timerId; intervals.set(id, fn); return id; },
@@ -808,4 +809,97 @@ test("随机落座使用服务端真实座号，不同座号均旋转到正下�
     assert.equal(descendants(empty).find((node) => node.className === "seat-name").textContent, "空座");
     assert.equal(empty.attributes["aria-label"], "空座，点击落座");
   }
+});
+
+test("本手结算明确标记赢家并把底池动画移向赢家，重复快照不重复播放，成员筹码用账本", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const first = gameSnapshot(); sockets[0].receive({ type: "SNAPSHOT", payload: first });
+  const player = first.game.players[0];
+  const complete = { ...first, revision: 2, game: { ...first.game, phase: "complete", pot: 300, result: { winners: [player.seatIndex], message: "本手已结算", hands: null } },
+    roomMembers: [{ ...player, stack: 500, state: "SEATED", totalBuyIn: 200 }] };
+  sockets[0].receive({ type: "SNAPSHOT", payload: complete });
+  const winner = elements["table-seats"].children.find(s => s.className.includes(" winner"));
+  assert.ok(winner); assert.equal(winner.attributes["data-seat-index"], String(player.seatIndex));
+  assert.match(elements["table-result"].textContent, /\+300.*获胜/);
+  assert.equal(descendants(winner).find(n => n.className === "seat-win").textContent, "获胜 +300");
+  assert.equal(elements["pot-label"].textContent, "已分配底池");
+  const chips = elements["payout-layer"].children;
+  assert.equal(chips.length, 6); assert.ok(chips.every(n => n.attributes["data-winner-seat"] === String(player.seatIndex)));
+  assert.ok(descendants(elements["members-list"]).some(n => n.className === "member-stack" && n.textContent === "当前筹码 500"));
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...complete, revision: 3 } });
+  assert.equal(elements["payout-layer"].children[0], chips[0]);
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: 4, game: { ...first.game, handId: "H2" } } });
+  assert.equal(elements["payout-layer"].children.length, 0);
+  assert.equal(elements["next-hand-countdown"].hidden, true);
+  assert.ok(!elements["table-seats"].children.some(s => s.className.includes(" winner")));
+});
+
+test("重连直接看到结算只显示赢家，不重放派奖；多赢家无分配字段不捏造金额", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const first = gameSnapshot();
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, game: { ...first.game, phase: "complete",
+    result: { winners: first.game.players.map(p => p.seatIndex), hands: null } } } });
+  assert.equal(elements["payout-layer"].children.length, 0);
+  const badges = descendants(elements["table-seats"]).filter(n => n.className === "seat-win");
+  assert.equal(badges.length, first.game.players.length); assert.ok(badges.every(n => n.textContent === "获胜"));
+});
+
+test("十秒倒计时不被新快照重置，到零不发送开始指令，服务端新手到达后自动进入", async () => {
+  let now = Date.now(); class ClockDate extends Date { static now() { return now; } }
+  const { elements, sockets, intervals } = mount([roomResponse()], "", { Date: ClockDate });
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const first = gameSnapshot(); sockets[0].receive({ type: "SNAPSHOT", payload: first });
+  const complete = { ...first, revision: 2, serverTime: new Date(now).toISOString(),
+    self: { ...first.self, role: "CREATOR", allowedCommands: ["START_HAND"] },
+    room: { ...first.room, playState: "RUNNING", nextHand: { status: "COUNTDOWN", sourceHandId: first.game.handId, startsAt: new Date(now + 10000).toISOString() } },
+    game: { ...first.game, phase: "complete", result: { winners: [first.game.players[0].seatIndex], hands: null } } };
+  sockets[0].receive({ type: "SNAPSHOT", payload: complete });
+  assert.equal(elements["next-hand-countdown"].textContent, "下一手 · 10s");
+  assert.equal(elements["start-hand"].hidden, true);
+  now += 6000;
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...complete, revision: 3, serverTime: new Date(now).toISOString() } });
+  assert.equal(elements["next-hand-countdown"].textContent, "下一手 · 4s");
+  now += 4000; for (const tick of intervals.values()) tick();
+  assert.equal(elements["next-hand-countdown"].textContent, "正在等待服务端发牌…");
+  assert.ok(!sockets[0].sent.some(f => ["READY", "START_HAND"].includes(f.type)));
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: 4, game: { ...first.game, handId: "H2", handNumber: 2 } } });
+  assert.equal(elements["next-hand-countdown"].hidden, true); assert.match(elements["table-phase"].textContent, /第 2 手/);
+});
+
+test("结算后起身或换人占座不把旧赢家和底牌显示到新用户身上", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const first = gameSnapshot();
+  first.game.players = first.game.players.map((player, index) => ({ ...player, userId: "old-" + index }));
+  sockets[0].receive({ type: "SNAPSHOT", payload: first });
+  const player = first.game.players[0];
+  const completed = { ...first, revision: 2, self: { ...first.self, seatIndex: null },
+    game: { ...first.game, phase: "complete", result: { winners: [player.seatIndex], hands: ["同花"] } },
+    roomMembers: [{ userId: "new-user", nickname: "新玩家", seatIndex: player.seatIndex, stack: 200, state: "SEATED" }] };
+  sockets[0].receive({ type: "SNAPSHOT", payload: completed });
+  const seat = elements["table-seats"].children.find(s => s.attributes["data-seat-index"] === String(player.seatIndex));
+  assert.equal(descendants(seat).find(n => n.className === "seat-name").textContent, "新玩家");
+  assert.ok(!seat.className.includes(" winner"));
+  assert.ok(!descendants(seat).some(n => n.className === "hole-cards"));
+  assert.equal(elements["payout-layer"].children.length, 0);
+  assert.equal(elements["deal-layer"].children.length, 0);
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...completed, revision: 3, roomMembers: [] } });
+  assert.ok(elements["table-seats"].children.every(s => s.className.includes(" empty")));
+});
+
+test("旧服务结算展示十秒不因快照更新重置，暂停及时切换提示", async () => {
+  let now = Date.now(); class ClockDate extends Date { static now() { return now; } }
+  const { elements, sockets, intervals } = mount([roomResponse()], "", { Date: ClockDate });
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const first = gameSnapshot(); const complete = { ...first, game: { ...first.game, phase: "complete", result: { winners: [first.game.players[0].seatIndex] } } };
+  sockets[0].receive({ type: "SNAPSHOT", payload: complete });
+  assert.equal(elements["next-hand-countdown"].textContent, "结算展示 · 10s");
+  now += 6000; sockets[0].receive({ type: "SNAPSHOT", payload: { ...complete, revision: 2 } });
+  assert.equal(elements["next-hand-countdown"].textContent, "结算展示 · 4s");
+  now += 4000; for (const tick of intervals.values()) tick();
+  assert.equal(elements["next-hand-countdown"].textContent, "等待服务端开启下一手");
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...complete, revision: 3, room: { ...complete.room, playState: "PAUSED" } } });
+  assert.equal(elements["next-hand-countdown"].textContent, "游戏已暂停");
 });

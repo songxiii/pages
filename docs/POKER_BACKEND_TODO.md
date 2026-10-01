@@ -2,7 +2,9 @@
 
 核对日期：2026-10-01。页面：`p.html`。核对依据是相邻 `daoleme` 仓库当前源码，不代表公网部署已完成验证。本文件可以直接交给 Java 开发；完整现有协议见 [ACTIVITY_POKER_API.md](ACTIVITY_POKER_API.md)。
 
-本轮取消准备排查更新：Java 业务服务已加入 UNREADY/BUY_IN/PAUSE_GAME/RESUME_GAME，PokerHand 已补齐 UTG 等位置，但本轮读取的 PokerRoomViewService 仍遗漏新命令授权及带入/暂停字段。前端对已准备、未开局、允许 STAND_UP 的旧快照兼容发送 UNREADY，仍由服务端校验；后端应补齐明确授权，避免依赖兼容。下文保留完整实现与验收要求，不能把命令加入白名单视为对接完成。
+最新核对更新：相邻 Java 已补齐 UNREADY/BUY_IN/PAUSE_GAME/RESUME_GAME 的业务与快照授权、带入/暂停字段，以及 UTG 等位置；这些原有缺口进入部署验收阶段。前端保留对只授权 STAND_UP 的旧取消准备快照的兼容。
+
+**本轮新增要求及仍待实现字段见 [赢家派奖与 10 秒自动续局设计](POKER_SETTLEMENT_AUTOPLAY.md)**：result.payouts / settledAt、room.nextHand、每手延续参局资格及服务端到期发牌。首次开始后不用再准备/开始；该新文档的续局及暂停恢复规则优先于下面原版的逐手准备/立即恢复描述。
 
 ## 1. 实现范围
 
@@ -12,10 +14,11 @@
 | --- | --- | --- |
 | 入口、开房 | 已有 POST `/api/poker/v1/entry`、`/api/poker/v1/rooms` | 沿用现有 ticket 身份验证 |
 | 连接、落座、准备、起身、开局、下注 | 已有 AUTH/PING/SIT_DOWN/READY/STAND_UP/START_HAND/ACTION | 沿用现有活动 v1 大写协议 |
-| 取消准备 | 业务已加入 UNREADY；视图未授权 | 已准备时返回 UNREADY，未准备时返回 READY |
-| 追加带入 | 业务已加入 BUY_IN；视图字段和授权待补齐 | 返回 room.buyIn、self/成员 pendingBuyIn 和 BUY_IN 授权；验收到账与恢复 |
-| 暂停游戏 | 业务已加入 PAUSE_GAME；视图未返回暂停状态/授权 | 返回 room.playState 与房主 PAUSE_GAME 授权；验收结算边界 |
-| 继续游戏 | 业务已加入 RESUME_GAME；视图未授权 | PAUSED 时授权房主 RESUME_GAME，禁用 START_HAND；验收人数与准备规则 |
+| 取消准备 | 业务与视图已加入 UNREADY | 部署验收：已准备授权 UNREADY，未准备授权 READY |
+| 追加带入 | BUY_IN、配置/金额/授权快照已加入 | 部署验收即时和延迟到账、幂等及恢复 |
+| 暂停游戏 | PAUSE_GAME、playState 和授权已加入 | 验收结算边界；新增自动续局排期取消规则 |
+| 继续游戏 | RESUME_GAME 和暂停授权已加入 | 按新设计改为恢复10秒排期，不要求再次准备 |
+| 赢家派奖明细和自动续局 | 当前缺 result.payouts / settledAt 和 room.nextHand | 按独立新文档增加字段和服务端持久调度 |
 | 成员头像、累计带入、盈亏 | 已有 avatarUrl/totalBuyIn/netChips | 沿用；第 6 节说明结算盈亏可选调整 |
 | UTG、UTG+1、LJ、HJ、CO | 当前 PokerHand 已补齐 | 沿用 position，部署后核对庄位轮转；旧版本由前端兼容 |
 
