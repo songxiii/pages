@@ -1061,8 +1061,9 @@ button.seat.empty {
 button.seat.empty:disabled { opacity:.35; cursor:default; }
 button.seat.empty:not(:disabled) { opacity:.72; cursor:pointer; }
 button.seat.empty:hover:not(:disabled) { background:none; }
-button.seat.empty:hover:not(:disabled) .seat-avatar { border-color:var(--gold); color:var(--gold); background:#e7c68b0b; }
+button.seat.empty { -webkit-tap-highlight-color:transparent; }
 button.seat.empty:active:not(:disabled) { transform:translate(-50%,-50%); }
+button.seat.empty:focus:not(:focus-visible) { outline:none; }
 button.seat.empty:focus-visible { border-radius:12px; }
 .menu-controls { clear:both; width:100%; display:grid; gap:9px; padding:8px 0 17px; border-bottom:1px solid #ffffff10; }
 .menu-controls h3 { margin:10px 0 0; color:#d7c19c; }
@@ -1124,9 +1125,12 @@ body.room-mode { height:100dvh; min-height:0; }
 .room-mode .seat.self .card { width:clamp(28px,calc(var(--seat-size) * .72),45px); height:clamp(39px,calc(var(--seat-size) * 1.0),62px); }
 .room-mode .seat.self .rank { font-size:16px; }
 .room-mode .seat.self .suit { font-size:25px; }
-.room-mode .table-center { top:33%; }
+.room-mode .table-center { top:37%; left:24%; width:52%; }
 .room-mode .table-blinds { margin-bottom:6px; }
-.room-mode .board-cards { margin-bottom:6px; min-height:0; }
+.room-mode .board-cards { margin-bottom:6px; min-height:0; gap:3px; }
+.room-mode .board-cards .card { width:calc((100% - 12px) / 5); max-width:44px; height:auto; aspect-ratio:0.68; flex-shrink:0; padding:3px; }
+.room-mode .board-cards .rank { font-size:clamp(13px,3.7vw,17px); }
+.room-mode .board-cards .suit { font-size:clamp(23px,6.6vw,31px); }
 .room-mode .table-phase { margin-top:6px; }
 .room-mode .table-result { margin:3px 0; line-height:1.3; }
 .room-mode .table-notice { flex-shrink:0; font-size:10px; line-height:1.5; min-height:16px; margin-top:0; }
@@ -1165,12 +1169,9 @@ body.room-mode { height:100dvh; min-height:0; }
   .room-mode .page-head { height:40px; }
   .room-mode .table-action { height:39px; }
   .room-mode .raise-presets button { min-height:31px; }
-  .room-mode .board-cards .card { width:25px; height:36px; padding:3px; }
-  .room-mode .board-cards .rank { font-size:11px; }
-  .room-mode .board-cards .suit { font-size:19px; }
   .room-mode .pot-box { padding:3px 8px; }
   .room-mode .pot-box strong { font-size:16px; }
-  .room-mode .table-center { top:31%; }
+  .room-mode .table-center { top:37%; }
 }
 
 .room-mode .hole-cards .card { width:clamp(19px,calc(var(--seat-size) * .60),32px); height:clamp(27px,calc(var(--seat-size) * .83),44px); }

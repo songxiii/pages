@@ -124,7 +124,11 @@ export function roomControls(view) {
     canSit,
     canStand: own !== null && allowed.includes("STAND_UP"),
     canReady: own !== null && !inHand && !ready && allowed.includes("READY"),
-    canUnready: own !== null && !inHand && ready && allowed.includes("UNREADY"),
+    // Current Java accepts UNREADY but older view builders only advertise STAND_UP for ready players.
+    // That permission confirms lobby participation; the server still validates cancellation atomically.
+    canUnready: own !== null && !inHand && ready && view.room?.status !== "CLOSED"
+      && !["ENDED", "CANCELLED"].includes(view.activity?.status)
+      && (allowed.includes("UNREADY") || allowed.includes("STAND_UP")),
     canBuyIn: allowed.includes("BUY_IN") && buyInOptions(view).length > 0,
     canStart: host && seated.length >= 2 && !inHand && !paused && !pausePending && allowed.includes("START_HAND"),
     canPause: host && !paused && !pausePending && (inHand || playState === "RUNNING") && allowed.includes("PAUSE_GAME"),

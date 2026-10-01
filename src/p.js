@@ -1,4 +1,4 @@
-import { createPokerTable, formatChips, safeAvatar, memberAmounts } from "./poker-table.js?v=20261001-position-labels";
+import { createPokerTable, formatChips, safeAvatar, memberAmounts } from "./poker-table.js?v=20261001-unready-board";
 import { POKER_API_BASE_URL } from "./poker-config.js";
 import { ticketFromLocation, ticketFragmentUrl, validateSettings, redactCredentials, normalizeWebSocketUrl } from "./poker-entry.js";
 

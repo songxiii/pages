@@ -2,6 +2,8 @@
 
 核对日期：2026-10-01。页面：`p.html`。核对依据是相邻 `daoleme` 仓库当前源码，不代表公网部署已完成验证。本文件可以直接交给 Java 开发；完整现有协议见 [ACTIVITY_POKER_API.md](ACTIVITY_POKER_API.md)。
 
+本轮取消准备排查更新：Java 业务服务已加入 UNREADY/BUY_IN/PAUSE_GAME/RESUME_GAME，PokerHand 已补齐 UTG 等位置，但本轮读取的 PokerRoomViewService 仍遗漏新命令授权及带入/暂停字段。前端对已准备、未开局、允许 STAND_UP 的旧快照兼容发送 UNREADY，仍由服务端校验；后端应补齐明确授权，避免依赖兼容。下文保留完整实现与验收要求，不能把命令加入白名单视为对接完成。
+
 ## 1. 实现范围
 
 前端已实现以下入口、消息发送和快照渲染，后端补齐并返回授权即可启用，不需要另建 HTTP 接口。
@@ -10,12 +12,12 @@
 | --- | --- | --- |
 | 入口、开房 | 已有 POST `/api/poker/v1/entry`、`/api/poker/v1/rooms` | 沿用现有 ticket 身份验证 |
 | 连接、落座、准备、起身、开局、下注 | 已有 AUTH/PING/SIT_DOWN/READY/STAND_UP/START_HAND/ACTION | 沿用现有活动 v1 大写协议 |
-| 取消准备 | 缺 `UNREADY` | 命令处理、权限、准备状态快照 |
-| 追加带入 | 缺 `BUY_IN`；已有初始带入账本和流水 | 金额配置、即时/延迟到账、流水幂等、恢复 |
-| 暂停游戏 | 缺 `PAUSE_GAME` | 本手结束后暂停；持久化 `room.playState` |
-| 继续游戏 | 缺 `RESUME_GAME` | 房主恢复并开始下一手；人数/准备校验 |
+| 取消准备 | 业务已加入 UNREADY；视图未授权 | 已准备时返回 UNREADY，未准备时返回 READY |
+| 追加带入 | 业务已加入 BUY_IN；视图字段和授权待补齐 | 返回 room.buyIn、self/成员 pendingBuyIn 和 BUY_IN 授权；验收到账与恢复 |
+| 暂停游戏 | 业务已加入 PAUSE_GAME；视图未返回暂停状态/授权 | 返回 room.playState 与房主 PAUSE_GAME 授权；验收结算边界 |
+| 继续游戏 | 业务已加入 RESUME_GAME；视图未授权 | PAUSED 时授权房主 RESUME_GAME，禁用 START_HAND；验收人数与准备规则 |
 | 成员头像、累计带入、盈亏 | 已有 avatarUrl/totalBuyIn/netChips | 沿用；第 6 节说明结算盈亏可选调整 |
-| UTG、UTG+1、LJ、HJ、CO | 当前只赋值 SB/BB/BTN，其余为空 | 前端已兼容推导；建议 Java 同步填全 position |
+| UTG、UTG+1、LJ、HJ、CO | 当前 PokerHand 已补齐 | 沿用 position，部署后核对庄位轮转；旧版本由前端兼容 |
 
 需要重点修改 `PokerActivityService`（命令白名单及事务）、`PokerRoomViewService`（授权与快照）、`PokerHand`（结算边界与位置）、账本/流水/房间存储及超时调度。`PokerSocketEndpoint` 已把认证后的非 PING 命令交给业务服务，沿用即可。禁止混用首页演示的小写协议。
 

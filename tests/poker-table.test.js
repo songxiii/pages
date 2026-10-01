@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ownSeat, tableLayout, raisePresets, handPositions, seatIndex, buyInOptions, memberAmounts, seatPositions } from "../src/poker-table.js";
+import { ownSeat, tableLayout, raisePresets, handPositions, seatIndex, buyInOptions, memberAmounts, seatPositions, roomControls } from "../src/poker-table.js";
 
 test("成员盈亏优先使用服务字段，兼容账本差额，缺失金额不能冒充零", () => {
   assert.deepEqual(memberAmounts({ totalBuyIn: 1000, stack: 800, netChips: 50 }), { totalBuyIn: 1000, netChips: 50 });
@@ -93,4 +93,14 @@ test("2–9人按本手参局顺序显示中文盲位和庄位、UTG等位置，
   assert.equal(seatPositions(game).get(5), "UTG"); assert.equal(seatPositions(game).get(8), "CO");
   assert.equal(seatPositions({ ...game, players: [...game.players, { seatIndex: 6, position: "UTG+1" }] }).get(6), "UTG+1");
   assert.equal(seatPositions(null).size, 0);
+});
+
+
+test("取消准备兼容仅授权起身的旧快照，仍拒绝牌局中、权限为空及活动关闭", () => {
+  const lobby = { self: { userId: "u1", seatIndex: 0, roomState: "READY", allowedCommands: ["STAND_UP"] },
+    room: { status: "WAITING" }, roomMembers: [{ userId: "u1", seatIndex: 0, state: "READY" }] };
+  assert.equal(roomControls(lobby).canUnready, true);
+  for (const overrides of [{ self: { ...lobby.self, allowedCommands: [] } }, { room: { status: "CLOSED" } },
+    { activity: { status: "ENDED" } }, { activity: { status: "CANCELLED" } }, { game: { phase: "flop" } },
+    { self: { ...lobby.self, seatIndex: null } }]) assert.equal(roomControls({ ...lobby, ...overrides }).canUnready, false);
 });

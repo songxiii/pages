@@ -667,16 +667,26 @@ test("准备状态显示在头像边，已准备可取消，收到快照后才�
   assert.ok(!descendants(elements["table-seats"]).some((node) => node.className === "seat-readiness"));
 });
 
-test("旧后端未授权取消准备或带入筹码时入口提示暂不开放，不发送不支持的指令", async () => {
+test("兼容Java取消准备命令已实现但快照只授权起身，带入仍需明确授权", async () => {
   const { elements, sockets } = mount([roomResponse()]);
   await new Promise(setImmediate); authenticate(sockets[0]);
   sockets[0].receive({ type: "SNAPSHOT", payload: lobbySnapshot({ self: { userId: "u1", seatIndex: 1, roomState: "READY", allowedCommands: ["STAND_UP"] },
     roomMembers: [{ userId: "u1", seatIndex: 1, state: "READY" }] }) });
-  assert.equal(elements["unready-player"].disabled, true);
-  assert.equal(elements["ready-detail"].hidden, false);
+  assert.equal(elements["unready-player"].disabled, false);
+  assert.equal(elements["ready-detail"].hidden, true);
   assert.equal(elements["submit-buy-in"].disabled, true);
-  elements["unready-player"].listeners.click(); elements["buy-in-form"].listeners.submit({ preventDefault() {} });
-  assert.ok(!sockets[0].sent.some((frame) => ["UNREADY", "BUY_IN"].includes(frame.type)));
+  elements["unready-player"].listeners.click();
+  assert.equal(sockets[0].sent.at(-1).type, "UNREADY");
+  assert.deepEqual(sockets[0].sent.at(-1).payload, {});
+  assert.equal(elements["unready-player"].disabled, true);
+  assert.ok(descendants(elements["table-seats"]).some((node) => node.className === "seat-readiness"));
+  sockets[0].receive({ type: "SNAPSHOT", payload: lobbySnapshot({ revision: 2,
+    self: { userId: "u1", seatIndex: 1, roomState: "SEATED", allowedCommands: ["READY", "STAND_UP"] },
+    roomMembers: [{ userId: "u1", seatIndex: 1, state: "SEATED" }] }) });
+  assert.equal(elements["unready-player"].hidden, true);
+  assert.ok(!descendants(elements["table-seats"]).some((node) => node.className === "seat-readiness"));
+  elements["buy-in-form"].listeners.submit({ preventDefault() {} });
+  assert.ok(!sockets[0].sent.some((frame) => frame.type === "BUY_IN"));
 });
 
 const buyIn = { minAmount: 200, maxAmount: 2000, step: 200, options: [200, 400, 1000, 2000] };
