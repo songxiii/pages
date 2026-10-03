@@ -6,7 +6,7 @@
   <meta name="referrer" content="no-referrer">
   <meta name="theme-color" content="#0d111b">
   <title>活动牌局</title>
-  <link rel="stylesheet" href="./p.css?v=20261003-raise-presets">
+  <link rel="stylesheet" href="./p.css?v=20261003-room-lifecycle">
 </head>
 <body>
   <main class="page">
@@ -77,6 +77,8 @@
         <button id="start-hand" class="menu-control primary" type="button">开始游戏</button>
         <button id="pause-game" class="menu-control secondary" type="button">暂停游戏 <small>本局结束后生效</small></button>
         <button id="resume-game" class="menu-control primary" type="button" hidden>继续游戏</button>
+        <button id="close-game" class="menu-control secondary" type="button">关闭游戏 <small>本手结束后结算</small></button>
+        <p id="close-game-detail" class="muted" role="status"></p>
       </section>
       <section id="player-controls" class="menu-controls" hidden aria-labelledby="player-control-title">
         <h3 id="player-control-title">我的座位</h3>
@@ -84,6 +86,7 @@
         <button id="unready-player" class="menu-control secondary" type="button" hidden>取消准备</button>
         <p id="ready-detail" class="muted" role="status" hidden></p>
         <button id="stand-up" class="menu-control secondary" type="button">起身 <small>离开座位，转为旁观</small></button>
+        <p id="stand-detail" class="muted" role="status" hidden></p>
       </section>
       <section id="buy-in-section" class="menu-controls" aria-labelledby="buy-in-title">
         <h3 id="buy-in-title">带入筹码</h3><p id="buy-in-balance" class="muted"></p>
@@ -92,12 +95,16 @@
       </section>
       <div class="summary-grid"><div><small>成员</small><strong id="room-member-count">0</strong></div><div><small>在线</small><strong id="online-count">0</strong></div><div><small>入座</small><strong id="seated-count">0</strong></div><div><small>你的状态</small><strong id="self-state">旁观中</strong></div></div><details class="menu-more"><summary>房间配置</summary><dl id="room-settings" class="settings-list"></dl></details><details class="menu-more"><summary>房间成员</summary><div id="members-list" class="members-list"></div></details>
       <details id="connection-panel" class="menu-more" hidden><summary>连接状态</summary><p id="ws-detail" class="muted" role="status"></p><button id="connect-ws" class="secondary" type="button">重新连接</button> <button id="refresh-room" class="secondary" type="button">重新检查房间</button></details>
-      <div class="versions"><span>页面版本 <time id="page-version" datetime="2026-10-03T17:52:13+08:00">2026-10-03 17:52:13</time></span><span>服务版本 <strong id="system-version">等待响应</strong></span></div>
+      <div class="versions"><span>页面版本 <time id="page-version" datetime="2026-10-03T18:12:12+08:00">2026-10-03 18:12:12</time></span><span>服务版本 <strong id="system-version">等待响应</strong></span></div>
     </aside>
     <details id="debug-panel" class="debug-panel" hidden><summary>接口调试</summary><form id="login-form"><label for="access-token">联调 Access token</label><input id="access-token" type="password" autocomplete="off" placeholder="当前账号的 access token"><button class="secondary" type="submit">验证并进入</button></form><div class="versions"><span>协议 <strong id="protocol-version">—</strong></span><span>凭证有效至 <strong id="ws-expires">—</strong></span></div><div class="connection-url"><code id="ws-url"></code><button id="copy-ws-url" class="secondary" type="button">复制地址</button></div><h3 id="debug-endpoint">请求接口</h3><pre id="debug-request"></pre><h3>响应</h3><pre id="debug-response"></pre></details>
     <dialog id="stand-dialog" class="confirm-dialog" aria-labelledby="stand-dialog-title" aria-describedby="stand-dialog-description">
       <div class="confirm-orbit" aria-hidden="true">↗</div><h2 id="stand-dialog-title">确认起身？</h2><p id="stand-dialog-description">离开当前座位后，你将以旁观身份观看牌局。</p>
       <div class="confirm-actions"><button id="cancel-stand" class="secondary" type="button" autofocus>继续落座</button><button id="confirm-stand" class="primary" type="button">确认起身</button></div>
+    </dialog>
+    <dialog id="close-game-dialog" class="confirm-dialog" aria-labelledby="close-game-dialog-title" aria-describedby="close-game-dialog-description">
+      <div class="confirm-orbit" aria-hidden="true">■</div><h2 id="close-game-dialog-title">确认关闭游戏？</h2><p id="close-game-dialog-description">当前手牌会继续完成，结束后不再发牌，并进入本场最终结算。</p>
+      <div class="confirm-actions"><button id="cancel-close-game" class="secondary" type="button" autofocus>继续游戏</button><button id="confirm-close-game" class="primary" type="button">确认关闭</button></div>
     </dialog>
     <dialog id="error-dialog" class="error-dialog" aria-labelledby="error-dialog-title" aria-describedby="error-dialog-message">
       <div class="section-head"><h2 id="error-dialog-title">操作遇到问题</h2><button id="close-error" class="icon-button" type="button" aria-label="关闭错误提示" autofocus>×</button></div>
@@ -105,6 +112,6 @@
       <details id="error-diagnostics" class="error-diagnostics"><summary>查看错误详情</summary><p class="muted">请求与返回内容如下，登录凭证已隐藏。</p><h3>接口请求</h3><pre id="error-request"></pre><h3>接口返回</h3><pre id="error-response"></pre></details>
     </dialog>
   </main>
-  <script type="module" src="./src/p.js?v=20261003-raise-presets"></script>
+  <script type="module" src="./src/p.js?v=20261003-room-lifecycle"></script>
 </body>
 </html>

@@ -1,26 +1,22 @@
 # Java 对接能力清单：房间时长、最终结算及历史剩余项
 
-核对日期：2026-10-02。依据为相邻 daoleme 当前源码，未以真实 ticket 验证线上部署。本文件是本轮统一交付清单，前端 p.html 已接入下面的字段。旧设计有冲突时以本文为准。
+更新核对日期：2026-10-03。依据为相邻 daoleme 当前源码，未以真实 ticket 验证线上部署。下文保留时长与结算的实现契约；最新开局后管理、起身弃牌、下局加入的差异与设计见 [本轮对接文档](POKER_JOIN_LEAVE_CONTROL.md)。
 
-## 1. 复用范围与尚缺能力
+## 1. 最新源码能力与剩余工作
 
-| 能力 | 当前源码 | 本轮工作 |
+| 能力 | 2026-10-03 当前源码 | 状态 |
 | --- | --- | --- |
-| 入口、开房、闭房只读入口 | POST `/api/poker/v1/entry`、`/api/poker/v1/rooms`，已有 ROOM_CLOSED | 复用这两个接口；闭房入口补最终报告，禁止重新初始化成员/筹码 |
-| 落座、准备/取消、起身、下注 | 已有 SIT_DOWN/READY/UNREADY/STAND_UP/START_HAND/ACTION | 沿用授权和事务；增加到期校验，当前手牌 ACTION 可继续 |
-| 带入、暂停、继续 | BUY_IN/PAUSE_GAME/RESUME_GAME、待到账、playState 已实现 | 复用；截止到时优先结束，暂停不延长时间，原待到账在最终关房前应用 |
-| 赢家金额、十秒连续开手 | result.payouts/settledAt、PokerNextHand、参局资格延续、服务端调度已实现 | 沿用；到期立即取消下一手排期，不能把下一手倒计时当最终结算倒计时 |
-| 固定游戏时长与房间截止 | RoomSettings/roomView/Repository 当前没有时长或 endsAt | **新增 durationMinutes 与 room.timing，持久化固定截止** |
-| 安全到期与关房 | 已有活动结束后等待手牌完成、closeEndedRoom/applyPending | **扩展共用生命周期方法：房间到期、暂停、无客户端时均能关闭；避免入口提前视为 CLOSED** |
-| 全场手数、流水、最大底池、个人手数 | 活动在线状态只存最新一手，没有持续累加这些统计 | **在首次结算事务累加全场与每人计数** |
-| 最终结算与排名 | 永久座位账本有 stack/totalBuyIn；当前成员视图过滤退出者，无最终报告 | **按完整账本冻结 settlement，包括已起身/退出/离线的人** |
-| 关房通知 | ROOM_CLOSED 目前只有 message；WebSocket 可能直接关闭 | **推送完整最终 game + settlement + room.timing，再关闭连接** |
-| 超时一律弃牌 | 有独立于在线连接的超时调度，免费行动超时仍 check | **PokerHand.timeout() 一律 fold** |
-| 全下立即结算提示 | allIn 仅判断最终 stack==0，赢家派奖后会 false | **HandPlayer 增加 allInCommitted，前端已兼容** |
+| 入口、开房、闭房只读入口 | entry/rooms、完整 ROOM_CLOSED、冻结 settlement | 已实现，复用 |
+| 带入、准备/取消、暂停/继续 | BUY_IN/READY/UNREADY/PAUSE_GAME/RESUME_GAME | 已实现，准备展示仅用于首次启动 |
+| 赢家金额、十秒自动开手 | payouts/settledAt/PokerNextHand/服务端调度 | 已实现，复用 |
+| 游戏时长与到期收尾 | durationMinutes/PokerRoomTiming/requestEndOrFinalize | 已实现，复用 |
+| 全场统计、完整账本最终报告 | accumulate/freezeSettlement、Repository 持久字段 | 已实现，复用 |
+| 超时一律弃牌、全下承诺 | timeout 一律 fold、allInCommitted | 已实现 |
+| 主动关闭游戏 | 无 CLOSE_GAME 命令 | 本轮增量，复用结束屏障 |
+| 本手中起身与中途落座 | running 时均 HAND_RUNNING，视图不授权 | 本轮扩展 STAND_UP/SIT_DOWN，详见新文档 |
+| 新落座自动下局参局 | 当前落座 ready=false，必须再次准备 | 本轮扩展内部参局承诺和 participation 投影 |
 
-无需新增 HTTP 接口、新的 WebSocket 地址、客户端 END_GAME 或 FETCH_SETTLEMENT 命令。HTTP 和 WS 共用 PokerRoomViewService 的投影及同一份最终报告。
-
-**发布依赖：当前 RoomSettings 使用 JsonAnySetter 拒绝未知字段，新的 durationMinutes 请求现在会被拒绝。必须先上线后端配置支持，再发布/使用新版开房表单；不能偷偷丢弃时长后声称已设定。** 已有房间继续使用原字段；不含 timing 的旧快照不会显示虚构倒计时。
+原“新 durationMinutes 会被拒绝”“时长/统计尚未落地”“timeout 免费过牌仍 check”等结论已过期。以下章节是已实现能力的契约与验收要求，不是待开发清单；线上是否包含这些实现须按 systemVersion 核对。
 
 ## 2. 开房与时长语义
 
@@ -88,8 +84,8 @@
 
 - `PokerActivityService.execute/startHand/advanceNextHand/updateNextHand`：每个持房间锁的操作都检查 now 与截止；当前手的 ACTION 允许继续，其余按结束状态拒绝。nextHand 原排期即使先到也要重新检查 room 截止。
 - `persistHand`：首次完成结算后先统计；若结束待办或截止到达，走最终关房，跳过 ready 自动延续及下一手排期。
-- `PokerRoomService.open`：当前以活动 ENDED/CANCELLED 直接返回 ROOM_CLOSED，可能尚有运行中手牌。应先复核真实生命周期：还有手牌返回 ROOM_READY + timing.ENDING，只有真正完成后 ROOM_CLOSED。到期也不要新建成员或初始账本。
-- `verifyIdentity`、WS `stillAuthorized`：当前活动结束检查可能一并拒绝 ACTION/断开连接。区分写入新游戏资格与完成当前手；正常有效身份的本手玩家仍能行动，并能收到最后一手/最终报告。活动退出/封禁的权限规则仍由 Java 校验，离线行动由超时调度处理。
+- `PokerRoomService.open`：已复用真实生命周期复核：还有手牌返回 ROOM_READY + timing.ENDING，只有真正完成后 ROOM_CLOSED。到期也不要新建成员或初始账本。
+- `verifyIdentity`、WS `stillAuthorized`：已区分写入新游戏资格与完成当前手；正常有效身份的本手玩家仍能行动，并能收到最后一手/最终报告。活动退出/封禁的权限规则仍由 Java 校验，离线行动由超时调度处理。
 - `closeEndedRoom`：复用关房事务，扩展到时长到期；只能在手牌结束后闭房并冻结报告。
 
 ### 3.3 调度
@@ -126,7 +122,7 @@ finalPot 已由现有 PokerHand 计算并扣除未跟注退回；不要二次求
 
 Repository mapper/COLUMNS/INSERT/运行状态更新都要同步。统一提交 runtime 更新时写入对应字段，避免多个旧 updateRuntime 重载清空截止/报告或重复增加 version。每条 SQL 仍只操作当前仓库约定的一张表。
 
-实际活动协议目前只覆盖保存最新手牌的 poker_activity_state；数据库设计中的 poker_hand/poker_hand_player 不等于已落地的历史写入。若后续接入历史流水，可复用它们审计，但本轮不要求重写引擎。旧场次缺历史时不能从最后一手补造全场统计：应明确标记缺失，或只对新房启用完整统计。迁移时旧房未知统计字段保留 NULL、报告返 null（前端显示 —），不能以默认 0 冒充真实零手；新房从 0 开始。
+本时长与结算实现采用最新手牌 poker_activity_state 配合持久累加统计；是否增加 poker_hand/poker_hand_player 历史写入应单独核对对应版本。若后续接入历史流水，可复用它们审计，但本轮不要求重写引擎。旧场次缺历史时不能从最后一手补造全场统计：应明确标记缺失，或只对新房启用完整统计。迁移时旧房未知统计字段保留 NULL、报告返 null（前端显示 —），不能以默认 0 冒充真实零手；新房从 0 开始。
 
 ### 4.3 报告范围与持久化
 
@@ -187,12 +183,11 @@ Repository mapper/COLUMNS/INSERT/运行状态更新都要同步。统一提交 r
 - 读取最终报告沿用 ticket 与身份验证，建立明确只读权限：活动有效成员/房主可以看；若要求已退出的原玩家也能重新查看，应以历史 room_member 复核只读权限，不能因此允许重新游戏；封禁/无关联身份仍拒绝。关闭后不要依赖在线授权或“活动必须 UPCOMING”才能读。
 - 缺 settlement 的旧服务，前端只显示“尚未返回完整结算”与重试，手数/流水用 —；不会拿当前成员/最后一手拼造全场报告。
 
-## 6. 之前仍未完成的两项
+## 6. 历史剩余项已完成
 
-1. `THPoker/domain/PokerHand.timeout()` 当前为 `currentBet > p.bet ? "fold" : "check"`，改为一律 `act(p.userId, "fold", null, seconds, now)`。离线仍由已有服务端调度处理；已全下玩家不再轮到 ACTION，不能因断线误弃全下牌。
-2. `HandPlayer.allInCommitted`：在 pay 实际支付>0且支付后 stack==0 时设 true（盲注、跟注、加注均覆盖）；持久化在本手状态、view 输出；refund/payout 后保留，新手重置。避免全下立即结算的赢家 allIn=false 而漏提示。前端支持该字段，普通 allIn 语义不变。
+`PokerHand.timeout()` 已一律 fold；`HandPlayer.allInCommitted` 已在 pay 后设置、view 输出并持久化。无需重复实现。手牌隐藏、当前下注、folded/turnDeadline、准备/取消、带入、暂停、派奖和十秒自动下一手也继续复用。
 
-手牌隐藏、当前下注、folded/turnDeadline 等已有字段均复用，详见 [行动效果设计](POKER_ACTION_EFFECTS_TIMEOUT.md)。准备/取消、带入、暂停、派奖和十秒自动下一手已经在源码实现，不列为“需要重做”的能力。
+本轮仍缺主动关闭、本手中起身、中途落座下局自动加入，参见 [新设计与验收](POKER_JOIN_LEAVE_CONTROL.md)。
 
 ## 7. 验收与上线顺序
 

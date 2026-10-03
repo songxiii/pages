@@ -1,6 +1,28 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ownSeat, tableLayout, raisePresets, handPositions, seatIndex, buyInOptions, memberAmounts, seatPositions, roomControls, handAwards, nextHandState } from "../src/poker-table.js";
+import { ownSeat, tableLayout, raisePresets, handPositions, seatIndex, buyInOptions, memberAmounts, seatPositions, roomControls, handAwards, nextHandState, playerReady, waitingNextHand, memberStateText } from "../src/poker-table.js";
+
+test("首次开始后取消准备展示和权限，连续游戏等待、暂停期间也不恢复准备", () => {
+  const member = { userId: "a", seatIndex: 0, ready: true, state: "READY" };
+  for (const playState of ["RUNNING", "PAUSED", "PAUSE_PENDING"]) {
+    const view = { room: { playState }, self: { ...member, allowedCommands: ["READY", "UNREADY", "START_HAND"] }, roomMembers: [member] };
+    assert.equal(playerReady(view, member), false);
+    assert.equal(roomControls(view).canReady, false); assert.equal(roomControls(view).canUnready, false);
+    assert.equal(memberStateText(view, member), "等待下一手");
+  }
+  assert.equal(playerReady({ game: { phase: "complete" } }, member), false);
+});
+
+test("下局加入按用户身份与当前参局名单判断，不能因同座位继承上一人的牌", () => {
+  const member = { userId: "new", seatIndex: 1 };
+  const view = { game: { phase: "flop", players: [{ userId: "old", seatIndex: 1 }] } };
+  assert.equal(waitingNextHand(view, member), true);
+  assert.equal(memberStateText(view, member), "下局加入");
+  assert.equal(waitingNextHand(view, { ...member, seatIndex: null }), false);
+  const joined = { ...view, game: { phase: "preflop", players: [member] } };
+  assert.equal(waitingNextHand(joined, { ...member, participation: "WAITING_NEXT_HAND" }), false);
+  assert.equal(memberStateText(joined, member), "牌局中");
+});
 
 test("成员盈亏优先使用服务字段，兼容账本差额，缺失金额不能冒充零", () => {
   assert.deepEqual(memberAmounts({ totalBuyIn: 1000, stack: 800, netChips: 50 }), { totalBuyIn: 1000, netChips: 50 });

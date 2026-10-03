@@ -1,7 +1,7 @@
-import { createPokerTable, formatChips, safeAvatar, memberAmounts } from "./poker-table.js?v=20261003-raise-presets";
+import { createPokerTable, formatChips, safeAvatar, memberAmounts, memberStateText } from "./poker-table.js?v=20261003-room-lifecycle";
 import { POKER_API_BASE_URL } from "./poker-config.js";
 import { ticketFromLocation, ticketFragmentUrl, validateSettings, redactCredentials, normalizeWebSocketUrl } from "./poker-entry.js";
-import { roomEnded, sessionClock, settlementShowAt, settlementRows, settlementStats } from "./poker-session.js?v=20261002-session-summary";
+import { roomEnded, sessionClock, settlementShowAt, settlementRows, settlementStats } from "./poker-session.js?v=20261003-room-lifecycle";
 
 const $ = (id) => document.getElementById(id);
 const apiBase = POKER_API_BASE_URL.replace(/\/$/, "");
@@ -9,7 +9,6 @@ const ticket = ticketFromLocation(window.location);
 const fragmentUrl = ticketFragmentUrl(window.location);
 if (fragmentUrl) history.replaceState(null, "", fragmentUrl);
 
-const stateNames = { WATCHING: "旁观中", STANDING: "已起身", SEATED: "已入座", READY: "已准备", IN_HAND: "牌局中" };
 const activityNames = { UPCOMING: "即将开始", FULL: "人数已满", ENDED: "已结束", CANCELLED: "已取消" };
 const number = (value) => Number(value || 0).toLocaleString("zh-CN");
 const tokenStorageKey = "poker-entry-access-token";
@@ -33,6 +32,7 @@ const table = createPokerTable({ document,
   onError: (detail, awaitingReply = false) => showError(detail, awaitingReply
     ? { request: lastWsRequest, response: { error: detail, received: false } } : undefined),
   confirmStand: confirmStanding,
+  confirmClose: confirmClosing,
 });
 const debug = new URLSearchParams(window.location.search).get("debug") === "1";
 $("debug-panel").hidden = !debug;
@@ -108,6 +108,7 @@ function finishSession(data, live = false) {
   stopSessionClocks(); clearSocket(); connection = null;
   toggleDrawer("room-details", "room-menu", false);
   if ($("stand-dialog").open) $("stand-dialog").close("cancel");
+  if ($("close-game-dialog").open) $("close-game-dialog").close("cancel");
   view = { ...data, connection: null, self: { ...data.self, allowedCommands: [] } };
   const serverTime = Date.parse(view.serverTime || "");
   roomClockOffset = Number.isFinite(serverTime) ? serverTime - Date.now() : 0;
@@ -392,11 +393,11 @@ function renderRoom() {
   const members = Array.isArray(view.roomMembers) ? view.roomMembers : [];
   const own = members.find((member) => String(member.id || member.userId) === String(self.id || self.userId));
   text("room-title", view.activity?.title || room.name || "活动房间");
-  text("room-status", room.playState === "PAUSE_PENDING" ? "本局结束后暂停" : room.playState === "PAUSED" ? "已暂停" : room.status === "WAITING" ? "等待开局" : room.status === "PLAYING" ? "牌局进行中" : room.status || "房间");
+  text("room-status", room.timing?.status === "ENDING" ? "本手结束后结算" : room.playState === "PAUSE_PENDING" ? "本局结束后暂停" : room.playState === "PAUSED" ? "已暂停" : room.playState === "RUNNING" && room.status === "WAITING" ? "等待下一手" : room.status === "WAITING" ? "等待开局" : room.status === "PLAYING" ? "牌局进行中" : room.status || "房间");
   text("room-member-count", number(counts.roomMemberCount));
   text("online-count", number(counts.onlineCount));
   text("seated-count", number(counts.seatedCount));
-  text("self-state", stateNames[self.roomState] || self.roomState || "旁观中");
+  text("self-state", memberStateText(view, { ...self, ...own }));
   const list = $("room-settings");
   list.replaceChildren();
   addDefinition(list, "座位上限", (settings.maxSeats || "—") + " 人");
@@ -436,7 +437,7 @@ function renderRoom() {
     const name = document.createElement("strong");
     name.textContent = member.nickname || "房间成员";
     const detail = document.createElement("small");
-    detail.textContent = (stateNames[member.state] || member.state || "旁观中")
+    detail.textContent = memberStateText(view, member)
       + " · " + (member.online ? "在线" : "离线");
     profile.append(name, detail);
     const balance = document.createElement("div");
@@ -638,18 +639,43 @@ async function connectWebSocket() {
 $("close-error").addEventListener("click", () => $("error-dialog").close());
 $("show-error").addEventListener("click", () => { if (!$("error-dialog").open) $("error-dialog").showModal(); });
 let resolveStanding = null;
-function confirmStanding() {
+function confirmStanding({ abandoningHand = false } = {}) {
+  text("stand-dialog-description", abandoningHand ? "起身将立即放弃本手，已下注筹码仍留在底池。离开座位后，你将转为旁观。" : "离开当前座位后，你将以旁观身份观看牌局。");
   return new Promise((resolve) => {
     resolveStanding = resolve;
     $("stand-dialog").returnValue = "";
     $("stand-dialog").showModal();
   });
 }
-$("cancel-stand").addEventListener("click", () => $("stand-dialog").close("cancel"));
-$("confirm-stand").addEventListener("click", () => $("stand-dialog").close("confirm"));
+function finishStanding(value) {
+  const resolve = resolveStanding; resolveStanding = null;
+  $("stand-dialog").close(value); resolve?.(value === "confirm");
+}
+$("cancel-stand").addEventListener("click", () => finishStanding("cancel"));
+$("confirm-stand").addEventListener("click", () => finishStanding("confirm"));
 $("stand-dialog").addEventListener("close", () => {
+  if ($("stand-dialog").open) return;
   const resolve = resolveStanding; resolveStanding = null;
   resolve?.($("stand-dialog").returnValue === "confirm");
+});
+let resolveClosing = null;
+function confirmClosing() {
+  return new Promise(resolve => {
+    resolveClosing = resolve;
+    $("close-game-dialog").returnValue = "";
+    $("close-game-dialog").showModal();
+  });
+}
+function finishClosing(value) {
+  const resolve = resolveClosing; resolveClosing = null;
+  $("close-game-dialog").close(value); resolve?.(value === "confirm");
+}
+$("cancel-close-game").addEventListener("click", () => finishClosing("cancel"));
+$("confirm-close-game").addEventListener("click", () => finishClosing("confirm"));
+$("close-game-dialog").addEventListener("close", () => {
+  if ($("close-game-dialog").open) return;
+  const resolve = resolveClosing; resolveClosing = null;
+  resolve?.($("close-game-dialog").returnValue === "confirm");
 });
 if (typeof ResizeObserver !== "undefined") new ResizeObserver(() => table.resize()).observe($("table-stage"));
 

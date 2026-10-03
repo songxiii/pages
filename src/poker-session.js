@@ -12,7 +12,8 @@ export function sessionClock(view, now = Date.now()) {
   if (roomEnded(view)) return { visible: true, text: "本场已结束", status: "ENDED", seconds: 0 };
   const end = Date.parse(view?.room?.timing?.endsAt || "");
   if (view?.room?.timing?.status === "ENDING" || Number.isFinite(end) && now >= end) {
-    return { visible: true, text: view?.game && view.game.phase !== "complete" ? "时间已到 · 本手结束后结算" : "时间已到 · 等待结算", status: "ENDING", seconds: 0 };
+    const reason = view?.room?.timing?.reason === "HOST_CLOSED" ? "房主已结束本场" : "时间已到";
+    return { visible: true, text: reason + (view?.game && view.game.phase !== "complete" ? " · 本手结束后结算" : " · 等待结算"), status: "ENDING", seconds: 0 };
   }
   if (!Number.isFinite(end)) return { visible: false, status: "UNKNOWN", seconds: null };
   const seconds = Math.max(0, Math.ceil((end - now) / 1000));

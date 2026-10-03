@@ -473,6 +473,92 @@ test("暂停请求明确等待本局结束，申请后仍允许本手行动，�
   assert.equal(sockets[0].sent.at(-1).type, "RESUME_GAME");
 });
 
+test("开局后本手和等待下一手都隐藏准备，新成员标明下局加入且不获当前手牌", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const member = { userId: "new", seatIndex: 3, nickname: "新玩家", ready: true, state: "READY", participation: "WAITING_NEXT_HAND", stack: 200 };
+  const first = gameSnapshot({ self: { ...member, roomState: "READY", allowedCommands: ["READY", "UNREADY", "STAND_UP"] },
+    roomMembers: [member], room: { playState: "RUNNING", settings: { maxSeats: 6 } } });
+  sockets[0].receive({ type: "SNAPSHOT", payload: first });
+  assert.equal(elements["ready-player"].hidden, true); assert.equal(elements["unready-player"].hidden, true);
+  assert.equal(elements["self-state"].textContent, "下局加入");
+  assert.ok(descendants(elements["table-seats"]).some(node => node.className === "seat-next-hand" && node.textContent === "下局加入"));
+  assert.ok(!descendants(elements["table-seats"]).some(node => node.className === "seat-readiness"));
+  assert.equal(elements["call-action"].disabled, true);
+  const seat = elements["table-seats"].children.find(node => node.getAttribute("data-seat-index") === "3");
+  assert.ok(!descendants(seat).some(node => node.className === "hole-cards"));
+  const complete = { ...first, revision: 2, game: { ...first.game, phase: "complete", legal: null } };
+  sockets[0].receive({ type: "SNAPSHOT", payload: complete });
+  assert.equal(elements["self-state"].textContent, "下局加入");
+  assert.equal(elements["ready-player"].hidden, true); assert.equal(elements["unready-player"].hidden, true);
+  const next = { ...first, revision: 3, game: { ...first.game, handId: "H2", turn: 3, players: [...first.game.players, { ...member, hole: ["As", "Ks"] }] } };
+  sockets[0].receive({ type: "SNAPSHOT", payload: next });
+  assert.equal(elements["self-state"].textContent, "牌局中");
+  assert.ok(!descendants(elements["table-seats"]).some(node => node.className === "seat-next-hand"));
+  assert.equal(elements["call-action"].disabled, false);
+});
+
+test("本手起身经自定义确认只发 STAND_UP，服务端确认后转旁观并保留弃牌特效", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const first = gameSnapshot(); first.self.allowedCommands = ["STAND_UP"];
+  sockets[0].receive({ type: "SNAPSHOT", payload: first });
+  const confirmed = elements["stand-up"].listeners.click();
+  assert.match(elements["stand-dialog-description"].textContent, /立即放弃本手.*底池/);
+  elements["confirm-stand"].listeners.click(); await confirmed;
+  assert.deepEqual(sockets[0].sent.at(-1).payload, {}); assert.equal(sockets[0].sent.at(-1).type, "STAND_UP");
+  assert.ok(!sockets[0].sent.some(frame => frame.type === "ACTION"));
+  assert.equal(elements["stand-up"].hidden, false);
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: 2, self: { ...first.self, seatIndex: null, allowedCommands: [] },
+    game: { ...first.game, turn: 1, legal: null, players: first.game.players.map((p, i) => ({ ...p, folded: i === 0 })) } } });
+  assert.equal(elements["stand-up"].hidden, true); assert.equal(elements["call-action"].disabled, true);
+  assert.ok(descendants(elements["table-seats"]).some(node => node.className === "seat-state" && node.textContent === "已弃牌"));
+});
+
+test("关闭游戏只供服务端授权的房主，自定义确认后等当前手结束，未授权不能发命令", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const first = gameSnapshot(); first.self.allowedCommands = ["PAUSE_GAME", "CLOSE_GAME"];
+  sockets[0].receive({ type: "SNAPSHOT", payload: first });
+  assert.equal(elements["pause-game"].disabled, false); assert.equal(elements["close-game"].disabled, false);
+  assert.equal(elements["start-hand"].hidden, true);
+  const cancelled = elements["close-game"].listeners.click();
+  elements["cancel-close-game"].listeners.click(); await cancelled;
+  assert.ok(!sockets[0].sent.some(frame => frame.type === "CLOSE_GAME"));
+  const confirmed = elements["close-game"].listeners.click();
+  elements["confirm-close-game"].listeners.click(); await confirmed;
+  assert.equal(sockets[0].sent.at(-1).type, "CLOSE_GAME");
+  assert.deepEqual(sockets[0].sent.at(-1).payload, { afterCurrentHand: true });
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: 2, room: { ...first.room, timing: { status: "ENDING", reason: "HOST_CLOSED" } } } });
+  assert.equal(elements["call-action"].disabled, false); assert.equal(elements["close-game"].disabled, true);
+  assert.match(elements["session-countdown"].textContent, /房主已结束本场/);
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: 3, self: { ...first.self, role: "MEMBER" } } });
+  assert.equal(elements["close-game"].hidden, true); await elements["close-game"].listeners.click();
+  assert.equal(sockets[0].sent.filter(frame => frame.type === "CLOSE_GAME").length, 1);
+});
+
+test("旧服务没有本手起身和关闭授权时说明原因，不假装完成", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  sockets[0].receive({ type: "SNAPSHOT", payload: gameSnapshot() });
+  assert.equal(elements["stand-up"].disabled, true); assert.match(elements["stand-detail"].textContent, /尚未授权/);
+  assert.equal(elements["close-game"].disabled, true); assert.match(elements["close-game-detail"].textContent, /尚未开放/);
+  await elements["close-game"].listeners.click(); await elements["stand-up"].listeners.click();
+  assert.ok(!sockets[0].sent.some(frame => ["STAND_UP", "CLOSE_GAME"].includes(frame.type)));
+});
+
+test("起身确认期间进入新手牌，不能沿用旧确认放弃新手", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const first = gameSnapshot(); first.self.allowedCommands = ["STAND_UP"];
+  sockets[0].receive({ type: "SNAPSHOT", payload: first });
+  const confirmed = elements["stand-up"].listeners.click();
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: 2, game: { ...first.game, handId: "H2" } } });
+  elements["confirm-stand"].listeners.click(); await confirmed;
+  assert.ok(!sockets[0].sent.some(frame => frame.type === "STAND_UP"));
+  assert.match(elements["error-dialog-message"].textContent, /重新确认/);
+});
+
 test("起身使用页面确认动画，取消不发请求，确认后发 STAND_UP，旁观者隐藏选项", async () => {
   const { elements, sockets } = mount([roomResponse()]);
   await new Promise(setImmediate); authenticate(sockets[0]);

@@ -1180,6 +1180,7 @@ body.room-mode { height:100dvh; min-height:0; }
 .room-mode .seat-marker { width:14px; height:14px; border-radius:3px; font-size:7px; }
 .room-mode .dealer-button { font-size:10px; }
 .seat-readiness { position:absolute; top:0; right:0; padding:2px 4px; border:1px solid #83cca060; border-radius:7px; color:#b4e8c4; background:#19402ee8; font-size:9px; z-index:6; }
+.seat-next-hand { position:absolute; top:0; right:0; padding:2px 4px; border:1px solid #e9bb6360; border-radius:7px; color:#ffe0a0; background:#45341be8; font-size:9px; z-index:6; white-space:nowrap; }
 .room-mode .hole-cards, .room-mode .seat.self .hole-cards { bottom:calc(100% - var(--seat-size) + 13px); z-index:6; }
 .room-mode .seat.self .card { width:clamp(28px,calc(var(--seat-size) * .72),45px); height:clamp(45px,calc(var(--seat-size) * 1.0),65px); justify-content:flex-start; gap:1px; padding:2px 3px; }
 .room-mode .seat.self .rank { font-size:clamp(17px,4.8vw,23px); line-height:.9; }
