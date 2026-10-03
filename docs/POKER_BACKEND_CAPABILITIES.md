@@ -2,6 +2,8 @@
 
 更新核对日期：2026-10-03。依据为相邻 daoleme 当前源码，未以真实 ticket 验证线上部署。下文保留时长与结算的实现契约；最新开局后管理、起身弃牌、下局加入的差异与设计见 [本轮对接文档](POKER_JOIN_LEAVE_CONTROL.md)。
 
+最新恢复规则见 [人数不足与补筹码恢复](POKER_WAITING_RESUME.md)。当前 Java 已实现起身、落座、关闭；仍需调整 WAITING_PLAYERS 恢复时额外十秒的排期。
+
 ## 1. 最新源码能力与剩余工作
 
 | 能力 | 2026-10-03 当前源码 | 状态 |
@@ -12,9 +14,9 @@
 | 游戏时长与到期收尾 | durationMinutes/PokerRoomTiming/requestEndOrFinalize | 已实现，复用 |
 | 全场统计、完整账本最终报告 | accumulate/freezeSettlement、Repository 持久字段 | 已实现，复用 |
 | 超时一律弃牌、全下承诺 | timeout 一律 fold、allInCommitted | 已实现 |
-| 主动关闭游戏 | 无 CLOSE_GAME 命令 | 本轮增量，复用结束屏障 |
-| 本手中起身与中途落座 | running 时均 HAND_RUNNING，视图不授权 | 本轮扩展 STAND_UP/SIT_DOWN，详见新文档 |
-| 新落座自动下局参局 | 当前落座 ready=false，必须再次准备 | 本轮扩展内部参局承诺和 participation 投影 |
+| 主动关闭游戏 | CLOSE_GAME + HOST_CLOSED | 已实现，复用结束屏障 |
+| 本手中起身与中途落座 | STAND_UP/withdraw、SIT_DOWN/保留座已实现 | 已实现，复用 |
+| 新落座与补筹码自动参局 | updateNextHand 按有效在座资格恢复内部 ready | 已实现；恢复时还需移除额外十秒 |
 
 原“新 durationMinutes 会被拒绝”“时长/统计尚未落地”“timeout 免费过牌仍 check”等结论已过期。以下章节是已实现能力的契约与验收要求，不是待开发清单；线上是否包含这些实现须按 systemVersion 核对。
 
@@ -187,7 +189,7 @@ Repository mapper/COLUMNS/INSERT/运行状态更新都要同步。统一提交 r
 
 `PokerHand.timeout()` 已一律 fold；`HandPlayer.allInCommitted` 已在 pay 后设置、view 输出并持久化。无需重复实现。手牌隐藏、当前下注、folded/turnDeadline、准备/取消、带入、暂停、派奖和十秒自动下一手也继续复用。
 
-本轮仍缺主动关闭、本手中起身、中途落座下局自动加入，参见 [新设计与验收](POKER_JOIN_LEAVE_CONTROL.md)。
+主动关闭、本手起身和中途落座现已实现；本轮只需调整等人数恢复时的发牌时机，参见 [立即恢复设计](POKER_WAITING_RESUME.md)。
 
 ## 7. 验收与上线顺序
 

@@ -1,6 +1,29 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ownSeat, tableLayout, raisePresets, handPositions, seatIndex, buyInOptions, memberAmounts, seatPositions, roomControls, handAwards, nextHandState, playerReady, waitingNextHand, memberStateText } from "../src/poker-table.js";
+import { ownSeat, tableLayout, raisePresets, handPositions, seatIndex, buyInOptions, memberAmounts, seatPositions, roomControls, handAwards, nextHandState, playerReady, waitingNextHand, memberStateText, needsChips, eligiblePlayerCount } from "../src/poker-table.js";
+
+test("等人数只统计有可用筹码的在座成员，不计旁观者、起身者或未到账筹码", () => {
+  const view = { game: { handId: "H1", phase: "complete" }, room: { playState: "RUNNING", nextHand: { status: "WAITING_PLAYERS" } }, roomMembers: [
+    { seatIndex: 0, stack: 0, pendingBuyIn: 200 }, { seatIndex: 1, stack: 100 },
+    { seatIndex: null, stack: 200 }, { seatIndex: 2, state: "STANDING", stack: 200 } ] };
+  assert.equal(eligiblePlayerCount(view), 1);
+  assert.equal(nextHandState(view, Date.now()).text, "等待可参局玩家 · 1/2");
+  assert.equal(memberStateText(view, view.roomMembers[0]), "等待补筹码");
+  const funded = { ...view, roomMembers: view.roomMembers.map((m, i) => i === 0 ? { ...m, stack: 200 } : m) };
+  assert.equal(eligiblePlayerCount(funded), 2);
+  assert.equal(nextHandState(funded, Date.now()).text, "人数已满足，等待服务端发牌…");
+  assert.equal(eligiblePlayerCount({ ...view, roomMembers: [{ seatIndex: 0, stack: null }] }), null);
+  assert.equal(eligiblePlayerCount({ ...view, room: { nextHand: { eligiblePlayerCount: 0 } } }), 0);
+  assert.equal(eligiblePlayerCount({ ...view, room: { nextHand: { eligiblePlayerCount: 10 } } }), 1);
+});
+
+test("运行手牌中的零筹码全下仍可获胜，不显示等待补筹码", () => {
+  const member = { userId: "u0", seatIndex: 0, stack: 0 };
+  const view = { game: { phase: "flop", players: [{ ...member, allIn: true }] } };
+  assert.equal(needsChips(view, member), false);
+  assert.equal(memberStateText(view, member), "牌局中");
+  assert.equal(needsChips({ game: { phase: "complete" } }, { ...member, stack: null }), false);
+});
 
 test("首次开始后取消准备展示和权限，连续游戏等待、暂停期间也不恢复准备", () => {
   const member = { userId: "a", seatIndex: 0, ready: true, state: "READY" };

@@ -1103,6 +1103,37 @@ test("重连直接看到结算只显示赢家，不重放派奖；多赢家无�
   assert.equal(badges.length, first.game.players.length); assert.ok(badges.every(n => n.textContent === "获胜"));
 });
 
+test("零筹码等人数时提示补筹码，确认到账后服务端直接发下一手，不发准备或开始命令", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const first = gameSnapshot();
+  const buyIn = { minAmount: 200, maxAmount: 2000, step: 200, options: [200, 400] };
+  const waiting = { ...first, self: { ...first.self, stack: 0, allowedCommands: ["BUY_IN", "STAND_UP"] },
+    roomMembers: [{ userId: "1", seatIndex: 0, nickname: "本人", stack: 0 }, { userId: "other", seatIndex: 1, nickname: "对手", stack: 200 }],
+    room: { ...first.room, buyIn, playState: "RUNNING", nextHand: { status: "WAITING_PLAYERS", sourceHandId: "H1" } },
+    game: { ...first.game, phase: "complete", legal: null, turn: null } };
+  sockets[0].receive({ type: "SNAPSHOT", payload: waiting });
+  assert.equal(elements["next-hand-countdown"].textContent, "等待可参局玩家 · 1/2");
+  assert.equal(elements["self-state"].textContent, "等待补筹码");
+  assert.match(elements["table-notice"].textContent, /筹码为零/);
+  assert.match(elements["buy-in-detail"].textContent, /无需重新准备/);
+  assert.equal(elements["start-hand"].hidden, true); assert.equal(elements["ready-player"].hidden, true);
+  assert.ok(descendants(elements["table-seats"]).some(node => node.className === "seat-state" && node.textContent === "等待补筹码"));
+  elements["buy-in-amount"].value = "200"; elements["buy-in-form"].listeners.submit({ preventDefault() {} });
+  assert.equal(sockets[0].sent.at(-1).type, "BUY_IN");
+  assert.equal(elements["self-state"].textContent, "等待补筹码");
+  const funded = { ...waiting, revision: 2, self: { ...waiting.self, stack: 200 },
+    roomMembers: waiting.roomMembers.map((member, i) => i === 0 ? { ...member, stack: 200 } : member) };
+  sockets[0].receive({ type: "SNAPSHOT", payload: funded });
+  assert.equal(elements["next-hand-countdown"].textContent, "人数已满足，等待服务端发牌…");
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...funded, revision: 3, room: { ...funded.room, nextHand: { status: "IDLE" } },
+    game: { ...first.game, handId: "H2", handNumber: 2 } } });
+  assert.equal(elements["next-hand-countdown"].hidden, true);
+  assert.match(elements["table-phase"].textContent, /第 2 手/);
+  assert.equal(elements["call-action"].disabled, false);
+  assert.ok(!sockets[0].sent.some(frame => ["READY", "START_HAND", "RESUME_GAME"].includes(frame.type)));
+});
+
 test("十秒倒计时不被新快照重置，到零不发送开始指令，服务端新手到达后自动进入", async () => {
   let now = Date.now(); class ClockDate extends Date { static now() { return now; } }
   const { elements, sockets, intervals } = mount([roomResponse()], "", { Date: ClockDate });

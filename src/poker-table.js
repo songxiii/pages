@@ -51,7 +51,22 @@ export function waitingNextHand(view, member) {
   return member?.participation === "WAITING_NEXT_HAND" || member?.state === "WAITING_NEXT_HAND"
     || Boolean(view.game && view.game.phase !== "complete" && !handParticipant(view, member));
 }
+export function needsChips(view, member) {
+  if (!roomStarted(view) || roomEnded(view) || seatIndex(member) === null) return false;
+  // A zero-stack player in the running hand may be ALL IN, still eligible to win.
+  if (view.game && view.game.phase !== "complete" && handParticipant(view, member)) return false;
+  return typeof member?.stack === "number" && Number.isFinite(member.stack) && member.stack <= 0;
+}
+export function eligiblePlayerCount(view) {
+  const count = view.room?.nextHand?.eligiblePlayerCount;
+  if (Number.isInteger(count) && count >= 0 && count <= 9) return count;
+  if (!Array.isArray(view.roomMembers)) return null;
+  const seated = view.roomMembers.filter(member => seatIndex(member) !== null && !["WATCHING", "STANDING"].includes(member.state));
+  if (seated.some(member => typeof member.stack !== "number" || !Number.isFinite(member.stack))) return null;
+  return new Set(seated.filter(member => member.stack > 0).map(member => Number(seatIndex(member)))).size;
+}
 export function memberStateText(view, member) {
+  if (needsChips(view, member)) return "等待补筹码";
   if (waitingNextHand(view, member)) return "下局加入";
   if (seatIndex(member) === null) return "旁观中";
   if (roomStarted(view)) {
@@ -209,7 +224,11 @@ export function nextHandState(view, now, fallbackDeadline = null) {
   if (view.game && view.game.phase !== "complete") return { visible: false };
   if (roomEnding(view, now)) return { visible: true, text: view.room?.timing?.reason === "HOST_CLOSED" ? "房主已结束本场，等待结算" : "本场到时，等待结算" };
   if (view.room?.playState === "PAUSED" || view.room?.playState === "PAUSE_PENDING" || status === "PAUSED") return { visible: true, text: "游戏已暂停" };
-  if (status === "WAITING_PLAYERS") return { visible: true, text: "等待至少两名可参局玩家" };
+  if (status === "WAITING_PLAYERS") {
+    const count = eligiblePlayerCount(view);
+    return { visible: true, waitingPlayers: true, eligiblePlayerCount: count,
+      text: count === null ? "等待至少两名可参局玩家" : count < 2 ? "等待可参局玩家 · " + count + "/2" : "人数已满足，等待服务端发牌…" };
+  }
   if (status === "COUNTDOWN") {
     const deadline = Date.parse(view.room.nextHand.startsAt);
     if (Number.isFinite(deadline)) {
@@ -248,7 +267,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
   function resize() {
     const stage = $("table-stage");
     // Reserve caption space for positions and action status on short portrait screens.
-    const statusLine = [...$("table-seats").children].some(el => /\b(folded|all-in|offline)\b/.test(el.className)) ? 10 : 0;
+    const statusLine = [...$("table-seats").children].some(el => /\b(folded|all-in|offline|waiting-chips)\b/.test(el.className)) ? 10 : 0;
     stage.style.setProperty("--seat-size", Math.max(24, Math.min(76, stage.clientWidth * .15, stage.clientHeight * .115 - (game ? 10 : 0) - statusLine)) + "px");
     const layout = currentLayout();
     for (const el of $("table-seats").children) {
@@ -386,6 +405,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
       button.addEventListener("click", () => chooseRaise(amount)); presets.append(button);
     }
     const controls = roomControls(view, Date.now() + serverOffset), enabledControl = connected && !pending;
+    const eligibleCount = eligiblePlayerCount(view);
     for (const button of seatButtons) {
       // Keep unavailable seats clickable to explain why sitting is not possible.
       button.disabled = pending || roomEnded(view);
@@ -416,7 +436,8 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     $("submit-buy-in").disabled = !enabledControl || !controls.canBuyIn;
     $("buy-in-detail").textContent = !controls.canBuyIn ? "当前房间暂未开放带入筹码。"
       : pendingBuyIn > 0 ? "带入已确认，本局结算后到账。可继续追加。"
-      : controls.inHand ? "本局中追加的筹码将在本局结束后到账。" : "追加筹码将在确认后立即到账。";
+      : controls.inHand ? "本局中追加的筹码将在本局结束后到账。"
+      : view.room?.nextHand?.status === "WAITING_PLAYERS" ? "追加确认后立即到账，补足筹码后自动参局，无需重新准备。" : "追加筹码将在确认后立即到账。";
     $("start-hand").hidden = !controls.host || controls.started;
     $("start-hand").disabled = !enabledControl || !controls.canStart;
     $("pause-game").hidden = !controls.host || controls.paused;
@@ -431,6 +452,8 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
       : controls.canClose ? "关闭后不再发下一手，当前手牌结算后进入最终结算。" : "服务端尚未开放关闭游戏。";
     $("host-control-detail").textContent = controls.pausePending ? "当前这手继续进行，结算完成后暂停，不再发下一手。"
       : controls.paused ? (controls.seatedCount < 2 ? "游戏已暂停，至少 2 人落座后可继续。" : "游戏已暂停，继续后恢复发牌。")
+      : controls.started && view.room?.nextHand?.status === "WAITING_PLAYERS" ? (eligibleCount !== null && eligibleCount >= 2
+        ? "人数已满足，等待服务端发牌，无需重新开始。" : "有可用筹码的在座玩家不足 2 人时等待；人数恢复后由服务端自动开局，无需准备或再次开始。")
       : controls.seatedCount < 2 ? "至少需要 2 人落座，目前 " + controls.seatedCount + " 人。"
       : controls.inHand ? (controls.canPause ? "牌局进行中，暂停会在本局结束后生效。" : "牌局进行中，服务端尚未授权暂停游戏。")
       : controls.started ? "游戏已开始，每手结束后自动继续，无需重新准备或开始。" : controls.canStart ? "已有 " + controls.seatedCount + " 人落座，可以开始游戏。" : "已落座 " + controls.seatedCount + " 人，已准备 " + controls.readyCount + " 人，等待开局条件满足。";
@@ -487,6 +510,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
       game = { ...game, legal: betting.legal(game) };
     } else betting.observe(view);
     const members = view.roomMembers || [];
+    const eligibleCount = eligiblePlayerCount(view);
     const handKey = game?.handId ?? game?.handNumber ?? null;
     const newHand = handKey !== null && handKey !== lastHand;
     if (!game || newHand || selfSeat === null) holeCardsHidden = false;
@@ -522,6 +546,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
       const player = players.find((p) => p.seatIndex === place.seatIndex);
       const member = members.find((m) => Number(seatIndex(m)) === place.seatIndex && seatIndex(m) !== null);
       const person = game?.phase === "complete" ? (Array.isArray(view.roomMembers) ? member : player) : player || member;
+      const chipWait = person && needsChips(view, member || person);
       const sameParticipant = !person || !player || identity(person) == null || identity(player) == null || String(identity(person)) === String(identity(player));
       const playerKey = String(identity(player) ?? place.seatIndex);
       const previous = playerStates.get(playerKey);
@@ -539,7 +564,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
       const el = node(person ? "div" : "button", "seat" + (!person ? " empty" : "") + (mine ? " self" : "")
         + (award ? " winner" : "")
         + (current ? " current" : "") + (person && sameParticipant && folded ? " folded" : "")
-        + (person && sameParticipant && allIn ? " all-in" : "") + (folding && person ? " folding" : "") + (person?.online === false ? " offline" : "")
+        + (person && sameParticipant && allIn && !chipWait ? " all-in" : "") + (chipWait ? " waiting-chips" : "") + (folding && person ? " folding" : "") + (person?.online === false ? " offline" : "")
         + (place.x > 50 ? " right" : "") + (place.y <= 25 ? " top" : "") + (place.y > 85 ? " bottom" : ""));
       el.setAttribute("data-seat-index", String(place.seatIndex));
       if (folding) el.style.setProperty("--fold-delay", -(Date.now() - foldEffects.get(playerKey)) + "ms");
@@ -571,8 +596,8 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
       if (position) label.append(node("span", "seat-position", position));
       label.append(node("span", "seat-name", person ? name : "空座"));
       if (person) label.append(node("strong", "seat-stack", formatChips(person.stack)));
-      if (person && (sameParticipant && (folded || allIn) || person.online === false)) {
-        const state = node("span", "seat-state", sameParticipant && folded ? "已弃牌" : sameParticipant && allIn ? "ALL IN" : "离线");
+      if (person && (chipWait || sameParticipant && (folded || allIn) || person.online === false)) {
+        const state = node("span", "seat-state", chipWait ? "等待补筹码" : sameParticipant && folded ? "已弃牌" : sameParticipant && allIn ? "ALL IN" : "离线");
         state.setAttribute("role", "status"); label.append(state);
       }
       const markers = node("div", "seat-markers");
@@ -590,7 +615,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
         badge.setAttribute("title", name + " " + badge.textContent); el.append(badge);
       }
       if (person && playerReady(view, member || person)) el.append(node("span", "seat-readiness", "已准备"));
-      if (person && waitingNextHand(view, member || person)) el.append(node("span", "seat-next-hand", "下局加入"));
+      if (person && !chipWait && waitingNextHand(view, member || person)) el.append(node("span", "seat-next-hand", "下局加入"));
       if (person && player?.hole?.length && (game.phase !== "complete" || sameParticipant)) {
         const hole = node("div", "hole-cards");
         // Folded opponents stay private even if a malformed snapshot contains their cards.
@@ -625,6 +650,10 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     $("table-result").setAttribute("title", $("table-result").textContent);
     $("table-notice").textContent = !connected ? "正在同步牌局…" : roomControls(view, Date.now() + serverOffset).paused ? "游戏已暂停，等待房主继续"
       : !game ? (selfSeat === null ? (Number(settings.seatingType) === 0 ? "点击任意空座随机落座，由房主开始游戏" : "点击虚线空座落座，由房主开始游戏") : "已入座，等待房主开始游戏")
+      : game.phase === "complete" && view.room?.nextHand?.status === "WAITING_PLAYERS"
+        ? (selfSeat !== null && needsChips(view, (members.find(member => Number(seatIndex(member)) === selfSeat && seatIndex(member) !== null) || { ...view.self, seatIndex: selfSeat }))
+          ? "筹码为零，请在菜单补充筹码；到账后自动参局"
+          : eligibleCount !== null && eligibleCount >= 2 ? "人数已满足，等待服务端发牌…" : "等待可参局玩家，补筹码或新玩家落座后由服务端自动开局")
       : selfSeat === null ? "你正在旁观本场牌局" : waitingNextHand(view, { ...view.self, seatIndex: selfSeat }) ? "已落座 · 下局加入，本手结束后自动参局"
       : canAct() ? "轮到你行动" : game.phase === "complete" ? "本局结束，等待下一手" : "等待其他玩家行动";
     deadline = Date.parse(game?.turnDeadline || "");

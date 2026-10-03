@@ -1,5 +1,7 @@
 # 开局后管理、起身弃牌与下局加入
 
+本文件保留上一轮实现设计；当前 Java 已落地主动关闭、本手起身、中途落座及自动后续参局。后续补充：[人数不足等待与立即恢复](POKER_WAITING_RESUME.md)，人数恢复后不再增加十秒等待，以该规则为准。
+
 核对日期：2026-10-03。依据相邻 `daoleme/src/main/java/THPoker` 当前源码，不代表线上已部署。前端保留服务端授权：没有对应 `allowedCommands` 时说明原因，不伪造成功。
 
 ## 1. 现状与复用结论
@@ -7,10 +9,10 @@
 | 能力 | 当前 Java 源码 | 所需工作 |
 | --- | --- | --- |
 | 开局后暂停 | `execute(PAUSE_GAME)` 位于运行手牌限制前，`PokerRoomViewService` 在 `playState=RUNNING` 时授权房主 | 已支持。保留 `{afterCurrentHand:true}`；本手完成后 PAUSED，不提前终止手牌 |
-| 主动关闭游戏 | `execute` 命令白名单没有 CLOSE_GAME | 增加一个 WS 命令，复用已经实现的结束屏障与最终报告 |
-| 本手中起身 | SIT_DOWN/STAND_UP 均在 `if(running) reject(HAND_RUNNING)` 之后；视图也不授权 | 将 STAND_UP 提到该限制前，事务内立即弃牌并释放在座资格 |
-| 中途落座，下局参局 | 同样被 HAND_RUNNING 拒绝；落座设置 `ready=false` | 允许占用合法空座，本手不发牌，延续参局资格到下一手 |
-| 开始后的准备状态 | 内部 ready 会在结算后延续，视图仍返 READY/UNREADY | 内部可继续复用 ready；开始后不再展示或授权准备/取消准备 |
+| 主动关闭游戏 | 已实现 CLOSE_GAME / HOST_CLOSED | 复用结束屏障与最终报告 |
+| 本手中起身 | STAND_UP / withdraw 已实现 | 复用事务内弃牌与释放资格 |
+| 中途落座，下局参局 | SIT_DOWN / 保留座与后续参局资格已实现 | 复用合法空座与下一手承诺 |
+| 开始后的准备状态 | 已按有效在座资格延续内部 ready，开始后拒绝 READY/UNREADY | 复用，无需再次准备 |
 | 时长与最终统计、10 秒最终结算 | 已有 RoomSettings.durationMinutes、PokerRoomTiming、requestEndOrFinalize、accumulate、freezeSettlement | 直接复用；本次无需重做，也无需新建结算接口 |
 | 超时弃牌、ALL IN | PokerHand.timeout 已一律 fold；HandPlayer.allInCommitted 已落地 | 已实现，无需重复开发 |
 
@@ -54,7 +56,7 @@ HTTP entry、rooms、原 WS 地址、requestId 去重、房间行锁、账本、
 - 只更新永久座位账本，不改当前 game.players、dealer、盲位、turn、deadline、底池、当前手私牌和牌堆。没有向新成员发当前手牌的操作。
 - 若首次游戏尚未开始：保留 ready=false，由本人准备。
 - 若已经开始：有可用筹码时设置内部 ready=true 作为下局承诺；无筹码时等待 BUY_IN 完成。本局 pendingBuyIn 到账后，同样补回“在座且有筹码且活动资格有效”的后续参局承诺。已起身者不能因此恢复。
-- 自动续局在结算后复用 applyPending、readyPlayers、updateNextHand、startHand，取最新承诺成员。新成员无需 READY/START_HAND；人数不足仍 WAITING_PLAYERS，恢复至少两人后按原逻辑提供完整十秒倒计时。
+- 自动续局在结算后复用 applyPending、readyPlayers、updateNextHand、startHand，取最新承诺成员。新成员无需 READY/START_HAND；人数不足仍 WAITING_PLAYERS，恢复至少两人后立即发下一手；正常结算后人数充足仍保留原十秒展示。
 - PAUSED 期间可落座并保留后续承诺，由房主 RESUME_GAME 后开始；PAUSE_PENDING 下新加入不能绕过暂停。
 
 在 self、roomMembers、seats 增量投影：
