@@ -1,5 +1,6 @@
-// Activity table: the server owns cards, money, turns and legal actions.
+// Activity table: the server owns cards, money and turns; the browser limits NLHE betting.
 import { roomEnding, roomEnded } from "./poker-session.js?v=20261003-room-lifecycle";
+import { createPokerBettingRules, validPokerRaise } from "./poker-betting.js?v=20261003-tda";
 export const PHASE_NAMES = { preflop: "翻牌前", flop: "翻牌", turn: "转牌", river: "河牌", complete: "本局结束" };
 // Clockwise visual order starts with the receiving player's seat at bottom center.
 // Each capacity has its own balanced layout; unoccupied seats keep their places.
@@ -129,7 +130,7 @@ export function raisePresets(game) {
   for (const ratio of [1.25, .75, .5, .33]) {
     const amount = Math.min(legal.maxRaiseTo,
       Math.max(legal.minRaiseTo, Math.ceil((bet + call + (pot + call) * ratio) / step) * step));
-    const label = amount === legal.maxRaiseTo ? "最大加注" : amount === legal.minRaiseTo ? "最小加注" : "底池 " + Math.round(ratio * 100) + "%";
+    const label = legal.shortAllInOnly ? "短码全下" : amount === legal.maxRaiseTo ? "最大加注" : amount === legal.minRaiseTo ? "最小加注" : "底池 " + Math.round(ratio * 100) + "%";
     if (!presets.has(amount)) presets.set(amount, { ratio, amount, label });
   }
   return [...presets.values()];
@@ -227,6 +228,7 @@ export function safeAvatar(url) {
 }
 export function createPokerTable({ document, onAction, onCommand, onError = () => {}, onCountdown = () => {}, confirmStand = () => false, confirmClose = () => false }) {
   const $ = (id) => document.getElementById(id);
+  const betting = createPokerBettingRules();
   let view = {}, game = null, connected = false, pending = false, pendingTimer = null;
   let lastHand = null, lastBoard = [], timer = null, deadline = null, currentTimer = null, currentSeconds = null, currentSeat = null;
   let lastLayoutKey = null, dealCleanupTimer = null;
@@ -335,7 +337,10 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     if (!canAct()) return;
     const legal = game.legal;
     if (action === "check" && !legal.canCheck || action === "call" && !legal.canCall || action === "fold" && legal.canFold === false) return;
-    if (action === "raise" && (!legal.canRaise || !Number.isFinite(amount) || amount < legal.minRaiseTo || amount > legal.maxRaiseTo)) return;
+    if (action === "raise" && !validPokerRaise(legal, amount)) {
+      reportError(legal.raiseReason || (legal.shortAllInOnly ? "筹码不足完整加注，只能全下至 " : "最小加注至 ") + formatChips(legal.minRaiseTo));
+      return;
+    }
     pending = true; updateActions();
     $("table-notice").textContent = "正在提交操作…";
     $("raise-editor").hidden = true; $("raise-toggle").setAttribute("aria-expanded", "false");
@@ -351,6 +356,9 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     if (!canAct() || !game.legal.canRaise) return;
     const input = $("raise-range");
     input.min = game.legal.minRaiseTo; input.max = game.legal.maxRaiseTo; input.step = game.legal.chipUnit || 1;
+    if (!Number.isFinite(amount)) amount = game.legal.minRaiseTo;
+    amount = Math.min(game.legal.maxRaiseTo, Math.max(game.legal.minRaiseTo,
+      amount === game.legal.maxRaiseTo ? amount : Math.ceil(amount / input.step) * input.step));
     input.value = amount;
     $("raise-value").textContent = formatChips(amount);
     for (const button of $("raise-presets").children) button.setAttribute("aria-pressed", String(Number(button.getAttribute("data-raise-amount")) === Number(amount)));
@@ -362,7 +370,11 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     $("call-action").replaceChildren(node("span", "", legal.canCheck ? "过牌" : "跟注"));
     if (!legal.canCheck && legal.canCall) $("call-action").append(node("b", "", formatChips(legal.toCall)));
     $("raise-toggle").disabled = !enabled || !legal.canRaise;
-    if (!enabled) { $("raise-editor").hidden = true; $("raise-toggle").setAttribute("aria-expanded", "false"); }
+    $("raise-toggle").setAttribute("title", legal.raiseReason || "选择加注金额");
+    for (const id of ["raise-range", "all-in-action", "confirm-raise"]) $(id).disabled = !enabled || !legal.canRaise;
+    if (!enabled || !legal.canRaise) { $("raise-editor").hidden = true; $("raise-toggle").setAttribute("aria-expanded", "false"); }
+    else if (!$("raise-editor").hidden) chooseRaise(Number($("raise-range").value));
+    if (enabled && legal.raiseReason) $("table-notice").textContent = legal.raiseReason;
     const presets = $("raise-presets"); presets.replaceChildren();
     const options = enabled ? raisePresets(game) : [];
     presets.style.setProperty("--preset-count", String(Math.max(1, options.length)));
@@ -469,7 +481,11 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     const selfSeat = ownSeat(view);
     // `id` in the old two-player protocol is a seat; activity protocol uses explicit seatIndex.
     const players = (game?.players || []).map((p) => ({ ...p, seatIndex: Number(seatIndex(p) ?? p.id) }));
-    if (game) game = { ...game, players, turn: game.turn == null ? null : Number(game.turn) };
+    if (game) {
+      game = { ...game, players, turn: game.turn == null ? null : Number(game.turn), ...handPositions({ ...game, players }) };
+      betting.observe({ ...view, game });
+      game = { ...game, legal: betting.legal(game) };
+    } else betting.observe(view);
     const members = view.roomMembers || [];
     const handKey = game?.handId ?? game?.handNumber ?? null;
     const newHand = handKey !== null && handKey !== lastHand;
@@ -668,7 +684,9 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
   $("raise-toggle").addEventListener("click", () => {
     if (!canAct() || !game.legal.canRaise) return;
     chooseRaise(game.legal.minRaiseTo);
-    $("raise-limits").textContent = "可加注 " + formatChips(game.legal.minRaiseTo) + " – " + formatChips(game.legal.maxRaiseTo);
+    $("raise-limits").textContent = game.legal.shortAllInOnly
+      ? "完整加注至少至 " + formatChips(game.legal.minimumFullRaiseTo) + "，当前只能短码全下至 " + formatChips(game.legal.maxRaiseTo)
+      : "可加注 " + formatChips(game.legal.minRaiseTo) + " – " + formatChips(game.legal.maxRaiseTo);
     $("raise-editor").hidden = !$("raise-editor").hidden;
     $("raise-toggle").setAttribute("aria-expanded", String(!$("raise-editor").hidden));
   });
@@ -707,6 +725,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     setConnected(value, notice) { connected = value; updateActions(); if (notice) $("table-notice").textContent = notice; },
     reject(message) { clearTimeout(pendingTimer); pending = false; updateActions(); $("table-notice").textContent = message; },
     reset() { clearInterval(timer); clearInterval(nextHandTimer); clearTimeout(pendingTimer); clearTimeout(dealCleanupTimer); clearTimeout(payoutCleanupTimer);
+      betting.reset();
       holeCardsHidden = false; selfCards = []; closeProfile();
       $("deal-layer").replaceChildren(); $("payout-layer").replaceChildren(); $("next-hand-countdown").hidden = true;
       lastLayoutKey = null; lastHand = null; lastBoard = []; activeHandSeen = null; lastPaidHand = null; fallbackHand = null; fallbackDeadline = null;

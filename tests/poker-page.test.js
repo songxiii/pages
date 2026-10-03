@@ -10,7 +10,8 @@ const tableScript = readFileSync(new URL("../src/poker-table.js", import.meta.ur
 const sessionScript = readFileSync(new URL("../src/poker-session.js", import.meta.url), "utf8").replace(/^export /gm, "");
 const historyScript = readFileSync(new URL("../src/poker-history.js", import.meta.url), "utf8").replace(/^export /gm, "");
 const soundScript = readFileSync(new URL("../src/poker-sound.js", import.meta.url), "utf8").replace(/^export /gm, "");
-const script = sessionScript + "\n" + tableScript + "\n" + historyScript + "\n" + soundScript + "\n" + readFileSync(new URL("../src/p.js", import.meta.url), "utf8").replace(/^import .*;\n/gm, "");
+const bettingScript = readFileSync(new URL("../src/poker-betting.js", import.meta.url), "utf8").replace(/^export /gm, "");
+const script = bettingScript + "\n" + sessionScript + "\n" + tableScript + "\n" + historyScript + "\n" + soundScript + "\n" + readFileSync(new URL("../src/p.js", import.meta.url), "utf8").replace(/^import .*;\n/gm, "");
 
 function element() {
   return {
@@ -873,10 +874,19 @@ test("打开起身确认后状态变化不再允许起身，确认也不发送�
   assert.ok(!sockets[0].sent.some((frame) => frame.type === "STAND_UP"));
 });
 
+// Observe the opening street before its first bet; current totals alone are not history.
+function seedRaiseRound(socket) {
+  const first = gameSnapshot({ revision: 0 }); first.game.phase = "flop"; first.game.turn = 1;
+  first.game.players.forEach(p => { p.bet = 0; p.stack = 200; });
+  socket.receive({ type: "SNAPSHOT", payload: first });
+}
+
 test("加注先打开金额面板，快捷金额和全下只选择，确认后才发送一次 ACTION", async () => {
   const { elements, sockets } = mount([roomResponse()]);
   await new Promise(setImmediate); authenticate(sockets[0]);
-  sockets[0].receive({ type: "SNAPSHOT", payload: gameSnapshot() });
+  seedRaiseRound(sockets[0]);
+  const snapshot = gameSnapshot(); snapshot.game.phase = "flop";
+  sockets[0].receive({ type: "SNAPSHOT", payload: snapshot });
   elements["raise-toggle"].listeners.click();
   assert.equal(elements["raise-editor"].hidden, false);
   assert.match(elements["raise-limits"].textContent, /6.*200/);
@@ -901,8 +911,10 @@ test("加注先打开金额面板，快捷金额和全下只选择，确认后�
 test("加注面板合并重复金额，选择后只高亮一个快捷选项", async () => {
   const { elements, sockets } = mount([roomResponse()]);
   await new Promise(setImmediate); authenticate(sockets[0]);
-  const snapshot = gameSnapshot();
-  snapshot.game.pot = 10;
+  seedRaiseRound(sockets[0]);
+  const snapshot = gameSnapshot(); snapshot.game.phase = "flop";
+  snapshot.game.players[0].stack = 8;
+  snapshot.game.pot = 3;
   snapshot.game.legal = { ...snapshot.game.legal, toCall: 0, minRaiseTo: 6, maxRaiseTo: 8 };
   sockets[0].receive({ type: "SNAPSHOT", payload: snapshot });
   elements["raise-toggle"].listeners.click();
@@ -915,6 +927,88 @@ test("加注面板合并重复金额，选择后只高亮一个快捷选项", as
   assert.equal(Number(elements["raise-range"].value), 8);
   assert.equal(buttons.filter((button) => button.getAttribute("aria-pressed") === "true").length, 1);
   assert.ok(!sockets[0].sent.some((frame) => frame.type === "ACTION"));
+});
+
+function bettingRound(socket, selfSeat = 0, stack = 1000) {
+  const view = gameSnapshot(); view.revision = 1; view.self.seatIndex = selfSeat;
+  view.room.settings.smallBlind = 10; view.room.settings.bigBlind = 20;
+  view.game.turn = 0; view.game.smallBlindSeat = 4; view.game.bigBlindSeat = 5;
+  view.game.players = Array.from({ length: 6 }, (_, seatIndex) => ({ seatIndex, nickname: "玩家" + seatIndex,
+    stack: seatIndex === selfSeat ? stack : 1000, bet: seatIndex === 4 ? 10 : seatIndex === 5 ? 20 : 0,
+    folded: false, allIn: false, hole: seatIndex === selfSeat ? ["Jc", "7h"] : [null, null] }));
+  // Deliberately incorrect capabilities: front-end rules must control the UI.
+  view.game.legal = { canRaise: true, canCall: true, minRaiseTo: 1, maxRaiseTo: 9999, toCall: 1 };
+  const send = () => socket.receive({ type: "SNAPSHOT", payload: view }); send();
+  return { view, act(seat, total, next, allIn = false) {
+    const p = view.game.players[seat]; p.stack = allIn ? 0 : p.stack - (total - p.bet);
+    p.bet = total; p.allIn = allIn; view.game.turn = next; view.revision++; send();
+  } };
+}
+
+test("页面在短全下后以120为下限，滑杆纠正100，提交前再次拦截非法金额", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const round = bettingRound(sockets[0], 2); round.act(0, 60, 1); round.act(1, 80, 2, true);
+  assert.equal(elements["raise-toggle"].disabled, false);
+  elements["raise-toggle"].listeners.click();
+  assert.equal(Number(elements["raise-range"].min), 120);
+  assert.equal(Number(elements["raise-range"].max), 1000);
+  assert.ok(elements["raise-presets"].children.every(b => Number(b.attributes["data-raise-amount"]) >= 120));
+  elements["raise-range"].value = "100";
+  elements["raise-editor"].listeners.submit({ preventDefault() {} });
+  assert.equal(sockets[0].sent.filter(f => f.type === "ACTION").length, 0);
+  assert.match(elements["error-dialog-message"].textContent, /120/);
+  elements["raise-range"].listeners.input();
+  assert.equal(Number(elements["raise-range"].value), 120);
+  elements["raise-editor"].listeners.submit({ preventDefault() {} });
+  assert.equal(sockets[0].sent.find(f => f.type === "ACTION").payload.amount, 120);
+});
+
+test("页面单独短全下不重开A，关闭加注面板及全下入口，仍可跟注20", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const round = bettingRound(sockets[0]); elements["raise-toggle"].listeners.click();
+  round.act(0, 60, 1); round.act(1, 80, 2, true); round.act(2, 80, 0);
+  for (const id of ["raise-toggle", "raise-range", "all-in-action", "confirm-raise"]) assert.equal(elements[id].disabled, true);
+  assert.equal(elements["raise-editor"].hidden, true);
+  assert.match(elements["table-notice"].textContent, /加注权未重新开放/);
+  elements["all-in-action"].listeners.click(); elements["raise-toggle"].listeners.click();
+  elements["raise-range"].value = "1000"; elements["raise-editor"].listeners.submit({ preventDefault() {} });
+  assert.equal(sockets[0].sent.filter(f => f.type === "ACTION").length, 0);
+  assert.equal(elements["call-action"].children[1].textContent, "20");
+  elements["call-action"].listeners.click();
+  assert.equal(sockets[0].sent.find(f => f.type === "ACTION").payload.action, "call");
+});
+
+test("页面不足完整加注允许且只允许真实短码全下95", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const round = bettingRound(sockets[0], 2, 95); round.act(0, 60, 1); round.act(1, 80, 2, true);
+  elements["raise-toggle"].listeners.click();
+  assert.equal(Number(elements["raise-range"].min), 95); assert.equal(Number(elements["raise-range"].max), 95);
+  assert.match(elements["raise-limits"].textContent, /120.*短码全下.*95/);
+  assert.equal(elements["raise-presets"].children.length, 1);
+  elements["raise-range"].value = "94"; elements["raise-editor"].listeners.submit({ preventDefault() {} });
+  assert.equal(sockets[0].sent.filter(f => f.type === "ACTION").length, 0);
+  elements["all-in-action"].listeners.click(); elements["raise-editor"].listeners.submit({ preventDefault() {} });
+  assert.equal(sockets[0].sent.find(f => f.type === "ACTION").payload.amount, 95);
+});
+
+test("首次进入下注中途暂禁加注，新街恢复且旧面板金额不会绕过新下限", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const view = gameSnapshot(); sockets[0].receive({ type: "SNAPSHOT", payload: view });
+  assert.equal(elements["raise-toggle"].disabled, true); assert.match(elements["table-notice"].textContent, /记录不完整/);
+  view.revision++; view.game.phase = "flop"; view.game.players.forEach(p => { p.bet = 0; });
+  sockets[0].receive({ type: "SNAPSHOT", payload: view });
+  assert.equal(elements["raise-toggle"].disabled, false);
+  elements["raise-toggle"].listeners.click(); assert.equal(Number(elements["raise-range"].min), 2);
+  view.revision++; view.game.turn = 1; sockets[0].receive({ type: "SNAPSHOT", payload: view });
+  view.revision++; view.game.players[1].bet = 20; view.game.turn = 0;
+  sockets[0].receive({ type: "SNAPSHOT", payload: view });
+  elements["raise-toggle"].listeners.click(); assert.equal(Number(elements["raise-range"].min), 40);
+  elements["raise-range"].value = "2"; elements["raise-editor"].listeners.submit({ preventDefault() {} });
+  assert.equal(sockets[0].sent.filter(f => f.type === "ACTION").length, 0);
 });
 
 test("成员列表展示头像、盈亏符号和累计带入，快照更新金额且缺失值不显示零", async () => {
