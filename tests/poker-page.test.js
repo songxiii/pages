@@ -7,7 +7,8 @@ import { ticketFromLocation, ticketFragmentUrl, validateSettings, redactCredenti
 
 const tableScript = readFileSync(new URL("../src/poker-table.js", import.meta.url), "utf8").replace(/^export /gm, "").replace(/^import .*;\n/gm, "");
 const sessionScript = readFileSync(new URL("../src/poker-session.js", import.meta.url), "utf8").replace(/^export /gm, "");
-const script = sessionScript + "\n" + tableScript + "\n" + readFileSync(new URL("../src/p.js", import.meta.url), "utf8").replace(/^import .*;\n/gm, "");
+const historyScript = readFileSync(new URL("../src/poker-history.js", import.meta.url), "utf8").replace(/^export /gm, "");
+const script = sessionScript + "\n" + tableScript + "\n" + historyScript + "\n" + readFileSync(new URL("../src/p.js", import.meta.url), "utf8").replace(/^import .*;\n/gm, "");
 
 function element() {
   return {
@@ -1181,4 +1182,152 @@ test("未冻结报告不显示为最终统计，重新获取失败保留已确�
   assert.equal(elements["error-dialog"].open, true);
   assert.match(elements["error-request"].textContent, /\/api\/poker\/v1\/entry/);
   assert.equal(sockets.length, 0);
+});
+
+function historyResponse(handNumber = 3, overrides = {}) {
+  return { status: 200, body: { code: 0, message: "success", systemVersion: version, data: {
+    roomId: "A123", throughHandNumber: 3, totalHands: 3, position: handNumber,
+    firstHandNumber: 1, lastHandNumber: 3, previousHandNumber: handNumber > 1 ? handNumber - 1 : null,
+    nextHandNumber: handNumber < 3 ? handNumber + 1 : null, coverage: { status: "COMPLETE" },
+    hand: { handId: "A123-H" + handNumber, handNumber, settledAt: "2026-10-03T05:56:00Z", pot: 200, smallBlind: 1, bigBlind: 2,
+      board: ["2d", "5c", "6h", "8c", "2h"], players: [
+        { userId: "1", nickname: "本人", position: "BB", holeCards: ["Qh", "8d"], handName: "两对", netChips: 100,
+          actions: [{ sequence: 5, street: "PREFLOP", type: "CALL", amount: 2 }, { sequence: 1, street: "PREFLOP", type: "POST_BIG_BLIND", amount: 2 }, { sequence: 9, street: "TURN", type: "BET", amount: 50 }] },
+        { userId: "2", nickname: "<对手>", avatarUrl: "javascript:alert(1)", position: "SB", holeCards: [null, null], folded: true, netChips: -100,
+          actions: [{ sequence: 8, street: "FLOP", type: "FOLD", source: "TIMEOUT" }] },
+      ] }, ...overrides,
+  } } };
+}
+
+test("历史入口按需查询本房间，逐人显示底牌、按序动作和红正绿负盈亏", async () => {
+  const { elements, calls } = mount([roomResponse(), historyResponse()], "access-token");
+  await new Promise(setImmediate);
+  assert.equal(elements["room-history"].hidden, false);
+  assert.equal(calls.length, 1);
+  elements["room-menu"].listeners.click();
+  elements["room-history"].listeners.click();
+  await new Promise(setImmediate);
+  assert.equal(elements["room-details"].hidden, true);
+  assert.equal(elements["history-dialog"].open, true);
+  assert.equal(elements["room-history"].attributes["aria-expanded"], "true");
+  assert.equal(calls[1].url, "https://api.example.com/api/poker/v1/rooms/history");
+  assert.equal(calls[1].options.headers.Authorization, "Bearer access-token");
+  assert.deepEqual(JSON.parse(calls[1].options.body), { ticket: "v1.k1.test", roomId: "A123" });
+  assert.equal(elements["history-position"].textContent, "3 / 3");
+  const rows = elements["history-players"].children;
+  assert.equal(rows.length, 2);
+  assert.match(rows[0].className, /is-self/);
+  assert.equal(rows[0].children[1].children[0].children[0].attributes["aria-label"], "Q♥");
+  assert.deepEqual(Array.from(rows[0].children[1].children.slice(2), x => x.textContent), ["大盲 2", "跟注 2"]);
+  assert.equal(rows[0].children[5].textContent, "+100");
+  assert.match(rows[0].children[5].className, /profit-positive/);
+  assert.equal(rows[1].children[5].textContent, "-100");
+  assert.match(rows[1].children[5].className, /profit-negative/);
+  assert.equal(descendants(rows[1]).filter(x => /history-card-back/.test(x.className)).length, 2);
+  assert.equal(descendants(rows[1]).filter(x => x.src).length, 0);
+  assert.equal(rows[1].children[0].children[1].textContent, "<对手>");
+  assert.equal(rows[1].children[2].children[1].textContent, "弃牌（超时）");
+  assert.equal(rows[1].children[3].children.length, 0);
+  assert.equal(rows[1].children[4].children.length, 0);
+});
+
+test("历史首末和前后导航使用固定范围，刷新及重开查询最新，端点不能越界", async () => {
+  const { elements, calls } = mount([roomResponse(), historyResponse(), historyResponse(2), historyResponse(1), historyResponse(3), historyResponse(), historyResponse()]);
+  await new Promise(setImmediate); elements["room-history"].listeners.click(); await new Promise(setImmediate);
+  assert.equal(elements["history-next"].disabled, true); assert.equal(elements["history-last"].disabled, true);
+  elements["history-next"].listeners.click(); assert.equal(calls.length, 2);
+  elements["history-prev"].listeners.click(); await new Promise(setImmediate);
+  assert.deepEqual(JSON.parse(calls[2].options.body), { ticket: "v1.k1.test", roomId: "A123", handNumber: 2, throughHandNumber: 3 });
+  elements["history-first"].listeners.click(); await new Promise(setImmediate);
+  assert.equal(elements["history-position"].textContent, "1 / 3");
+  assert.equal(elements["history-first"].disabled, true); assert.equal(elements["history-prev"].disabled, true);
+  elements["history-last"].listeners.click(); await new Promise(setImmediate);
+  assert.equal(JSON.parse(calls[4].options.body).handNumber, 3);
+  elements["refresh-history"].listeners.click(); await new Promise(setImmediate);
+  assert.equal(JSON.parse(calls[5].options.body).throughHandNumber, undefined);
+  elements["close-history"].listeners.click();
+  assert.equal(elements["history-dialog"].open, false); assert.equal(elements["room-history"].attributes["aria-expanded"], "false");
+  elements["room-history"].listeners.click(); await new Promise(setImmediate);
+  assert.equal(JSON.parse(calls[6].options.body).handNumber, undefined);
+});
+
+test("历史空记录、早期记录缺失和接口未部署均有可恢复提示", async () => {
+  const empty = historyResponse(3, { totalHands: 0, position: 0, hand: null });
+  const { elements, calls } = mount([roomResponse(), { status: 404, body: { code: 404, message: "Not found" } }, empty,
+    historyResponse(3, { coverage: { status: "PARTIAL", message: "仅保存第 3 手之后的记录" } })]);
+  await new Promise(setImmediate); elements["room-history"].listeners.click(); await new Promise(setImmediate);
+  assert.match(elements["history-status"].textContent, /暂未提供/);
+  assert.equal(elements["refresh-history"].textContent, "重试");
+  assert.equal(elements["error-dialog"].open, undefined);
+  elements["refresh-history"].listeners.click(); await new Promise(setImmediate);
+  assert.match(elements["history-status"].textContent, /暂无已结算/);
+  assert.equal(elements["history-hand"].hidden, true); assert.equal(elements["history-next"].disabled, true);
+  elements["refresh-history"].listeners.click(); await new Promise(setImmediate);
+  assert.equal(calls.length, 4); assert.equal(elements["history-coverage"].hidden, false);
+  assert.equal(elements["history-coverage"].textContent, "仅保存第 3 手之后的记录");
+});
+
+test("失败重试保留切换目标，错误房间响应不会覆盖已显示的历史", async () => {
+  const { elements, calls } = mount([roomResponse(), historyResponse(), { status: 500, body: { code: 500, message: "查询失败" } }, historyResponse(2), historyResponse(3, { roomId: "B999" })]);
+  await new Promise(setImmediate); elements["room-history"].listeners.click(); await new Promise(setImmediate);
+  elements["history-prev"].listeners.click(); await new Promise(setImmediate);
+  assert.match(elements["history-status"].textContent, /加载失败/);
+  assert.equal(elements["history-position"].textContent, "3 / 3");
+  elements["refresh-history"].listeners.click(); await new Promise(setImmediate);
+  assert.deepEqual(JSON.parse(calls[3].options.body), JSON.parse(calls[2].options.body));
+  assert.equal(elements["history-position"].textContent, "2 / 3");
+  elements["refresh-history"].listeners.click(); await new Promise(setImmediate);
+  assert.match(elements["history-status"].textContent, /响应格式不完整/);
+  assert.equal(elements["history-position"].textContent, "2 / 3");
+});
+
+test("关闭面板后忽略迟到历史响应，避免重新渲染及恢复分页", async () => {
+  const { elements } = mount([roomResponse(), historyResponse()]);
+  await new Promise(setImmediate);
+  elements["room-history"].listeners.click(); elements["close-history"].listeners.click();
+  await new Promise(setImmediate);
+  assert.equal(elements["history-dialog"].open, false);
+  assert.equal(elements["history-hand"].hidden, true);
+  assert.equal(elements["history-position"].textContent, "0 / 0");
+  assert.equal(elements["room-history"].attributes["aria-expanded"], "false");
+});
+
+test("房间最终结算仍可查历史，无房间的等待页面不显示入口", async () => {
+  const closed = roomResponse({}, { entryState: "ROOM_CLOSED", room: { roomId: "A123", status: "CLOSED" } });
+  const final = mount([closed, historyResponse()]);
+  await new Promise(setImmediate);
+  assert.equal(final.elements["settlement-panel"].hidden, false);
+  assert.equal(final.elements["room-history"].hidden, false);
+  final.elements["room-history"].listeners.click(); await new Promise(setImmediate);
+  assert.equal(final.elements["history-position"].textContent, "3 / 3");
+  const waiting = mount([roomResponse({}, { entryState: "WAITING_FOR_CREATOR", room: null })]);
+  await new Promise(setImmediate); assert.equal(waiting.elements["room-history"].hidden, true);
+});
+
+test("历史只公开合法摊牌，服务误传的弃牌对手底牌和牌型仍被隐藏", async () => {
+  const response = historyResponse();
+  const opponent = response.body.data.hand.players[1];
+  Object.assign(opponent, { holeCards: ["As", "Ah"], holeCardsRevealed: true, handName: "四条", folded: true });
+  const publicResponse = historyResponse();
+  Object.assign(publicResponse.body.data.hand.players[1], { holeCards: ["As", "Ah"], holeCardsRevealed: true, handName: "两对", folded: false, actions: [] });
+  const { elements } = mount([roomResponse(), response, publicResponse]);
+  await new Promise(setImmediate); elements["room-history"].listeners.click(); await new Promise(setImmediate);
+  const hidden = elements["history-players"].children[1];
+  assert.equal(descendants(hidden).filter(x => /history-card-back/.test(x.className)).length, 2);
+  assert.equal(descendants(hidden).find(x => x.className === "history-hand-name"), undefined);
+  elements["refresh-history"].listeners.click(); await new Promise(setImmediate);
+  const visible = elements["history-players"].children[1];
+  assert.equal(descendants(visible).filter(x => /history-card-back/.test(x.className)).length, 0);
+  assert.equal(visible.children[1].children[0].children[0].attributes["aria-label"], "A♠");
+});
+
+test("历史手数不连续时使用实际序号及相邻记录导航", async () => {
+  const first = historyResponse(102, { throughHandNumber: 102, totalHands: 2, position: 2, firstHandNumber: 100, lastHandNumber: 102, previousHandNumber: 100, nextHandNumber: null, coverage: { status: "PARTIAL" } });
+  const second = historyResponse(100, { throughHandNumber: 102, totalHands: 2, position: 1, firstHandNumber: 100, lastHandNumber: 102, previousHandNumber: null, nextHandNumber: 102, coverage: { status: "PARTIAL" } });
+  const { elements, calls } = mount([roomResponse(), first, second]);
+  await new Promise(setImmediate); elements["room-history"].listeners.click(); await new Promise(setImmediate);
+  assert.equal(elements["history-position"].textContent, "2 / 2");
+  elements["history-prev"].listeners.click(); await new Promise(setImmediate);
+  assert.equal(JSON.parse(calls[2].options.body).handNumber, 100);
+  assert.equal(elements["history-position"].textContent, "1 / 2");
 });

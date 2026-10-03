@@ -41,6 +41,8 @@ GitHub 项目调研见 [docs/RESEARCH.md](docs/RESEARCH.md)。
 
 **Java 所需字段和消息见 [活动牌桌接口对接说明](docs/ACTIVITY_POKER_API.md)**。新增牌局快照和操作命令已通过模拟服务验证，仍需真实 Java 联调；这个活动 v1 的大写协议与首页演示协议分开。
 
+右上角扑克牌图标打开本房间历史牌局，可查看逐人底牌、各街动作及本手盈亏，支持首局、上一局、下一局、末局与刷新最新；已关闭房间的结算页也保留入口。前端已接入 `POST /api/poker/v1/rooms/history`，接口未部署时提供提示和重试。Java 接口结构、只读权限、底牌可见性及复用现有牌局/玩家/动作表的写入方案见 [房间历史牌局接口设计](docs/POKER_ROOM_HISTORY_API.md)。已有完整 poker 表无需改表，但当前 Java 活动服务只覆盖保存最新一手，需要补历史持久化和查询；早期未保存记录不能恢复。本功能已通过模拟接口和浏览器布局验证，尚未与真实 Java 服务联调。
+
 API 域名配置在 [src/poker-config.js](src/poker-config.js)。如果页面与 Java 服务不同源，服务端需要把页面的精确 HTTPS Origin 配置到 `POKER_ALLOWED_ORIGINS`，并设置 `POKER_WS_PUBLIC_URL`。小程序或宿主应用需把 ticket 放在 URL fragment 中；access token 不应放进 URL。
 
 腾讯云托管当前服务的 `POKER_WS_PUBLIC_URL` 应设为 `wss://springboot-thzo-281960-9-1453811837.sh.run.tcloudbase.com/ws/poker/v1`，不要在公网 WSS 地址中拼接 `:80` 端口。页面兼容修正与 HTTPS API 同域的云托管 `wss://…:80` 地址，显示、复制和连接均使用修正后的公网地址；HTTP 调试区保留服务端原始响应。连接区域显示认证进度及断开的 code/reason。过期的 wsToken 会通过主入口重新获取。

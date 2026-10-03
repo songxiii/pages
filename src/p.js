@@ -2,6 +2,7 @@ import { createPokerTable, formatChips, safeAvatar, memberAmounts, memberStateTe
 import { POKER_API_BASE_URL } from "./poker-config.js";
 import { ticketFromLocation, ticketFragmentUrl, validateSettings, redactCredentials, normalizeWebSocketUrl } from "./poker-entry.js";
 import { roomEnded, sessionClock, settlementShowAt, settlementRows, settlementStats } from "./poker-session.js?v=20261003-room-lifecycle";
+import { createPokerHistory } from "./poker-history.js?v=20261003-room-history";
 
 const $ = (id) => document.getElementById(id);
 const apiBase = POKER_API_BASE_URL.replace(/\/$/, "");
@@ -26,6 +27,10 @@ let lastWsRequest = null;
 let lastHttpDiagnostic = null;
 let roomClockTimer = null, roomClockOffset = 0, settlementTimer = null;
 const wsRequests = new Map();
+const roomHistory = createPokerHistory({ document, request: post, formatChips, safeAvatar,
+  getRoom: () => view?.room ? { ticket, roomId: view.room.roomId, userId: view.self?.userId ?? view.self?.id } : null,
+  onOpen: () => toggleDrawer("room-details", "room-menu", false),
+});
 const table = createPokerTable({ document,
   onAction: (action, amount) => sendCommand("ACTION", { action, ...(amount == null ? {} : { amount }), handId: view?.game?.handId ?? view?.game?.handNumber, expectedRevision: view?.revision }),
   onCommand: (type, payload) => { sendCommand(type, payload); toggleDrawer("room-details", "room-menu", false); },
@@ -79,6 +84,8 @@ function showPanel(id) {
   $("ws-status").hidden = id === "settlement-panel";
   if (id !== "room-panel") stopSessionClocks();
   $("room-menu").hidden = id !== "room-panel";
+  $("room-history").hidden = !["room-panel", "settlement-panel"].includes(id) || !view?.room;
+  if ($("room-history").hidden) roomHistory.reset();
   if (id !== "room-panel") $("room-details").hidden = true;
   for (const panel of ["login-panel", "waiting-panel", "create-panel", "closed-panel", "error-panel", "room-panel", "settlement-panel", "connection-panel"]) {
     $(panel).hidden = panel !== id && !(id === "room-panel" && panel === "connection-panel");
@@ -336,6 +343,8 @@ async function createRoom(event) {
 }
 function applyView(data) {
   stopSessionClocks();
+  if (String(view?.room?.roomId) !== String(data.room?.roomId)
+      || String(view?.self?.userId ?? view?.self?.id) !== String(data.self?.userId ?? data.self?.id)) roomHistory.reset();
   view = data;
   $("activity-panel").hidden = !data.canCreate;
   const activity = data.activity || {};
@@ -695,7 +704,7 @@ $("create-form").addEventListener("change", (event) => {
   if (Number(stack.value) < Number(big.value) * 20) stack.value = [...stack.options].find((option) => !option.disabled).value;
 });
 function toggleDrawer(id, button, open) { $(id).hidden = !open; $(button).setAttribute("aria-expanded", String(open)); }
-$("room-menu").addEventListener("click", () => toggleDrawer("room-details", "room-menu", $("room-details").hidden));
+$("room-menu").addEventListener("click", () => { roomHistory.close(); toggleDrawer("room-details", "room-menu", $("room-details").hidden); });
 $("close-details").addEventListener("click", () => toggleDrawer("room-details", "room-menu", false));
 document.addEventListener("keydown", (event) => { if (event.key === "Escape") toggleDrawer("room-details", "room-menu", false); });
 $("refresh-room").addEventListener("click", () => { reconnectAttempts = 0; return enterRoom(); });
