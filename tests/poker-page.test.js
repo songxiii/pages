@@ -4,11 +4,13 @@ import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import { webcrypto } from "node:crypto";
 import { ticketFromLocation, ticketFragmentUrl, validateSettings, redactCredentials, normalizeWebSocketUrl } from "../src/poker-entry.js";
+import { fakeSoundEnvironment } from "../test-support/poker-audio.js";
 
 const tableScript = readFileSync(new URL("../src/poker-table.js", import.meta.url), "utf8").replace(/^export /gm, "").replace(/^import .*;\n/gm, "");
 const sessionScript = readFileSync(new URL("../src/poker-session.js", import.meta.url), "utf8").replace(/^export /gm, "");
 const historyScript = readFileSync(new URL("../src/poker-history.js", import.meta.url), "utf8").replace(/^export /gm, "");
-const script = sessionScript + "\n" + tableScript + "\n" + historyScript + "\n" + readFileSync(new URL("../src/p.js", import.meta.url), "utf8").replace(/^import .*;\n/gm, "");
+const soundScript = readFileSync(new URL("../src/poker-sound.js", import.meta.url), "utf8").replace(/^export /gm, "");
+const script = sessionScript + "\n" + tableScript + "\n" + historyScript + "\n" + soundScript + "\n" + readFileSync(new URL("../src/p.js", import.meta.url), "utf8").replace(/^import .*;\n/gm, "");
 
 function element() {
   return {
@@ -58,7 +60,7 @@ function mount(responses, initialToken = "", options = {}) {
   runInNewContext(script, {
     POKER_API_BASE_URL: options.apiBase || "https://api.example.com",
     ticketFromLocation, ticketFragmentUrl, validateSettings, redactCredentials, normalizeWebSocketUrl,
-    window: { location: { href: "https://example.com/p.html#ticket=v1.k1.test", protocol: "https:", search: "", hash: "#ticket=v1.k1.test" } },
+    window: { ...options.sound?.window, localStorage: options.sound?.localStorage, location: { href: "https://example.com/p.html#ticket=v1.k1.test", protocol: "https:", search: "", hash: "#ticket=v1.k1.test" } },
     WebSocket: FakeWebSocket, crypto: webcrypto,
     navigator: { clipboard: { async writeText(value) { copied.push(value); } } },
     document,
@@ -1384,4 +1386,57 @@ test("历史手数不连续时使用实际序号及相邻记录导航", async ()
   elements["history-prev"].listeners.click(); await new Promise(setImmediate);
   assert.equal(JSON.parse(calls[2].options.body).handNumber, 100);
   assert.equal(elements["history-position"].textContent, "1 / 2");
+});
+
+test("真实页面默认开启音效，服务端确认下注才响，重复快照和重连不重播，关开均保留牌局", async () => {
+  const sound = fakeSoundEnvironment();
+  const { elements, sockets, document } = mount([roomResponse()], "", { sound });
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  assert.equal(elements["sound-toggle"].attributes["aria-pressed"], "true");
+  const first = gameSnapshot(); sockets[0].receive({ type: "SNAPSHOT", payload: first });
+  document.listeners.pointerdown(); assert.equal(sound.nodes.length, 0);
+  elements["call-action"].listeners.click(); assert.equal(sound.nodes.length, 0);
+  const bet = { ...first, revision: 2, game: { ...first.game, pot: 9,
+    players: first.game.players.map((p, i) => i ? p : { ...p, stack: 197, bet: 3 }) } };
+  sockets[0].receive({ type: "SNAPSHOT", payload: bet });
+  const played = sound.nodes.length; assert.ok(played > 0);
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...bet, revision: 3 } }); assert.equal(sound.nodes.length, played);
+  elements["sound-toggle"].listeners.click();
+  assert.ok(sound.nodes.every(n => n.disconnected)); assert.equal(sound.storage.get("poker-sound-enabled"), "false");
+  const ended = { ...bet, revision: 4, game: { ...bet.game, phase: "complete", result: { winners: [0] } } };
+  sockets[0].receive({ type: "SNAPSHOT", payload: ended }); assert.equal(sound.nodes.length, played);
+  assert.match(elements["table-result"].textContent, /获胜/);
+  elements["sound-toggle"].listeners.click(); assert.equal(sound.storage.get("poker-sound-enabled"), "true");
+  const enabledCount = sound.nodes.length;
+  await elements["connect-ws"].listeners.click(); authenticate(sockets[1]);
+  sockets[1].receive({ type: "SNAPSHOT", payload: ended }); assert.equal(sound.nodes.length, enabledCount);
+});
+
+test("音效关闭状态在页面初始化恢复；行动和下一手计时随服务端时间提示且每秒去重", async () => {
+  const saved = fakeSoundEnvironment("false");
+  const muted = mount([roomResponse()], "", { sound: saved }); await new Promise(setImmediate);
+  assert.equal(muted.elements["sound-toggle"].attributes["aria-pressed"], "false");
+  muted.document.listeners.pointerdown(); assert.equal(saved.contexts.length, 0);
+
+  let now = Date.now(); class ClockDate extends Date { static now() { return now; } }
+  const sound = fakeSoundEnvironment();
+  const { elements, sockets, document, intervals } = mount([roomResponse()], "", { sound, Date: ClockDate });
+  await new Promise(setImmediate); authenticate(sockets[0]); document.listeners.pointerdown();
+  const first = gameSnapshot(); first.serverTime = new Date(now).toISOString(); first.game.turnDeadline = new Date(now + 11000).toISOString();
+  sockets[0].receive({ type: "SNAPSHOT", payload: first }); assert.equal(sound.nodes.length, 0);
+  now += 1000; for (const tick of intervals.values()) tick(); assert.equal(sound.nodes.length, 1);
+  for (const tick of intervals.values()) tick(); assert.equal(sound.nodes.length, 1);
+  now += 1000; for (const tick of intervals.values()) tick(); assert.equal(sound.nodes.length, 2);
+  sockets[0].onclose({ code: 1006 }); now += 1000;
+  for (const tick of intervals.values()) tick(); assert.equal(sound.nodes.length, 2);
+
+  await elements["connect-ws"].listeners.click(); authenticate(sockets[1]);
+  const completed = { ...first, revision: 2, serverTime: new Date(now).toISOString(),
+    room: { ...first.room, playState: "RUNNING", nextHand: { status: "COUNTDOWN", startsAt: new Date(now + 4000).toISOString() } },
+    game: { ...first.game, phase: "complete", turn: null, result: { winners: [0] } } };
+  sockets[1].receive({ type: "SNAPSHOT", payload: completed }); assert.equal(sound.nodes.length, 2);
+  now += 1000; for (const tick of intervals.values()) tick(); assert.equal(sound.nodes.length, 3);
+  sockets[1].receive({ type: "SNAPSHOT", payload: { ...completed, revision: 3, serverTime: new Date(now).toISOString() } });
+  assert.equal(sound.nodes.length, 3);
+  assert.equal(elements["next-hand-countdown"].textContent, "下一手 · 3s");
 });

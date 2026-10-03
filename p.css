@@ -137,6 +137,11 @@ button:active:not(:disabled) {
   font-size:18px;
   color:#cdd0d9;
 }
+.sound-toggle[data-enabled="true"] { color:#cbbb92; }
+.sound-toggle .sound-muted { display:none; }
+.sound-toggle[data-enabled="false"] .sound-waves { display:none; }
+.sound-toggle[data-enabled="false"] .sound-muted { display:block; }
+.sound-toggle:focus-visible { outline:2px solid #cbbb92; outline-offset:3px; }
 .page {
   width:100%;
   max-width:540px;

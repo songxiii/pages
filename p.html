@@ -6,7 +6,7 @@
   <meta name="referrer" content="no-referrer">
   <meta name="theme-color" content="#0d111b">
   <title>活动牌局</title>
-  <link rel="stylesheet" href="./p.css?v=20261003-avatar-flip">
+  <link rel="stylesheet" href="./p.css?v=20261003-sound">
 </head>
 <body>
   <main class="page">
@@ -14,6 +14,7 @@
       <button id="room-menu" class="icon-button" type="button" aria-label="房间信息" aria-expanded="false" aria-controls="room-details">☰</button>
       <div class="page-head-spacer"><span id="session-countdown" class="session-countdown" role="status" hidden></span></div>
       <span id="ws-status" class="connection-status">验证中</span>
+      <button id="sound-toggle" class="icon-button sound-toggle" type="button" aria-label="音效已开启，点击关闭" title="关闭音效" aria-pressed="true" data-enabled="true"><svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4Z"/><g class="sound-waves"><path d="M15 8a6 6 0 0 1 0 8M18 5a10 10 0 0 1 0 14"/></g><path class="sound-muted" d="m16 9 5 6m0-6-5 6"/></svg></button>
       <button id="show-error" class="icon-button error-history" type="button" aria-label="查看最近的错误" title="查看最近的错误" hidden>!</button>
       <button id="room-history" class="icon-button history-icon" type="button" aria-label="查看历史牌局" title="历史牌局" aria-expanded="false" aria-controls="history-dialog" hidden><svg viewBox="0 0 28 28" width="25" height="25" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="4" y="4" width="13" height="19" rx="2" transform="rotate(-14 10 14)"/><rect x="11" y="5" width="13" height="19" rx="2" fill="#202530"/><path d="m17.5 10 3 4.5-3 4.5-3-4.5Z"/></svg></button>
     </header>
@@ -101,7 +102,7 @@
       </section>
       <div class="summary-grid"><div><small>成员</small><strong id="room-member-count">0</strong></div><div><small>在线</small><strong id="online-count">0</strong></div><div><small>入座</small><strong id="seated-count">0</strong></div><div><small>你的状态</small><strong id="self-state">旁观中</strong></div></div><details class="menu-more"><summary>房间配置</summary><dl id="room-settings" class="settings-list"></dl></details><details class="menu-more"><summary>房间成员</summary><div id="members-list" class="members-list"></div></details>
       <details id="connection-panel" class="menu-more" hidden><summary>连接状态</summary><p id="ws-detail" class="muted" role="status"></p><button id="connect-ws" class="secondary" type="button">重新连接</button> <button id="refresh-room" class="secondary" type="button">重新检查房间</button></details>
-      <div class="versions"><span>页面版本 <time id="page-version" datetime="2026-10-03T18:45:09+08:00">2026-10-03 18:45:09</time></span><span>服务版本 <strong id="system-version">等待响应</strong></span></div>
+      <div class="versions"><span>页面版本 <time id="page-version" datetime="2026-10-03T20:08:32+08:00">2026-10-03 20:08:32</time></span><span>服务版本 <strong id="system-version">等待响应</strong></span></div>
     </aside>
     <details id="debug-panel" class="debug-panel" hidden><summary>接口调试</summary><form id="login-form"><label for="access-token">联调 Access token</label><input id="access-token" type="password" autocomplete="off" placeholder="当前账号的 access token"><button class="secondary" type="submit">验证并进入</button></form><div class="versions"><span>协议 <strong id="protocol-version">—</strong></span><span>凭证有效至 <strong id="ws-expires">—</strong></span></div><div class="connection-url"><code id="ws-url"></code><button id="copy-ws-url" class="secondary" type="button">复制地址</button></div><h3 id="debug-endpoint">请求接口</h3><pre id="debug-request"></pre><h3>响应</h3><pre id="debug-response"></pre></details>
     <dialog id="history-dialog" class="history-dialog" aria-labelledby="history-title">
@@ -131,6 +132,6 @@
       <details id="error-diagnostics" class="error-diagnostics"><summary>查看错误详情</summary><p class="muted">请求与返回内容如下，登录凭证已隐藏。</p><h3>接口请求</h3><pre id="error-request"></pre><h3>接口返回</h3><pre id="error-response"></pre></details>
     </dialog>
   </main>
-  <script type="module" src="./src/p.js?v=20261003-avatar-flip"></script>
+  <script type="module" src="./src/p.js?v=20261003-sound"></script>
 </body>
 </html>

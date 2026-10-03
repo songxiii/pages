@@ -1,10 +1,14 @@
-import { createPokerTable, formatChips, safeAvatar, memberAmounts, memberStateText } from "./poker-table.js?v=20261003-avatar-flip";
+import { createPokerTable, formatChips, safeAvatar, memberAmounts, memberStateText } from "./poker-table.js?v=20261003-sound";
 import { POKER_API_BASE_URL } from "./poker-config.js";
 import { ticketFromLocation, ticketFragmentUrl, validateSettings, redactCredentials, normalizeWebSocketUrl } from "./poker-entry.js";
 import { roomEnded, sessionClock, settlementShowAt, settlementRows, settlementStats } from "./poker-session.js?v=20261003-room-lifecycle";
 import { createPokerHistory } from "./poker-history.js?v=20261003-room-history";
+import { createPokerSound } from "./poker-sound.js?v=20261003-sound";
 
 const $ = (id) => document.getElementById(id);
+let soundStorage;
+try { soundStorage = window.localStorage; } catch { /* Storage may be blocked in embedded browsers. */ }
+const sounds = createPokerSound({ document, window, storage: soundStorage, button: $("sound-toggle") });
 const apiBase = POKER_API_BASE_URL.replace(/\/$/, "");
 const ticket = ticketFromLocation(window.location);
 const fragmentUrl = ticketFragmentUrl(window.location);
@@ -32,6 +36,7 @@ const roomHistory = createPokerHistory({ document, request: post, formatChips, s
   onOpen: () => toggleDrawer("room-details", "room-menu", false),
 });
 const table = createPokerTable({ document,
+  onCountdown: (...args) => sounds.countdown(...args),
   onAction: (action, amount) => sendCommand("ACTION", { action, ...(amount == null ? {} : { amount }), handId: view?.game?.handId ?? view?.game?.handNumber, expectedRevision: view?.revision }),
   onCommand: (type, payload) => { sendCommand(type, payload); toggleDrawer("room-details", "room-menu", false); },
   onError: (detail, awaitingReply = false) => showError(detail, awaitingReply
@@ -61,6 +66,7 @@ function diagnosticText(value) {
   return result;
 }
 function showError(detail, diagnostic = {}) {
+  sounds.play("error");
   text("error-dialog-message", detail);
   text("error-request", diagnosticText(diagnostic.request ?? "未发送接口请求（浏览器或本地检查）"));
   text("error-response", diagnosticText(diagnostic.response ?? { error: detail, received: false }));
@@ -342,6 +348,7 @@ async function createRoom(event) {
   }
 }
 function applyView(data) {
+  sounds.baseline(data);
   stopSessionClocks();
   if (String(view?.room?.roomId) !== String(data.room?.roomId)
       || String(view?.self?.userId ?? view?.self?.id) !== String(data.self?.userId ?? data.self?.id)) roomHistory.reset();
@@ -540,6 +547,7 @@ async function connectWebSocket() {
   let failure = "";
   let authenticated = false;
   let lastRevision = -1;
+  sounds.baseline();
   let lastMessageAt = Date.now();
   setWsStatus("正在连接");
   text("ws-detail", "正在连接 " + url.href);
@@ -595,6 +603,7 @@ async function connectWebSocket() {
       if (Number.isFinite(revision) && revision <= lastRevision) return;
       if (Number.isFinite(revision)) lastRevision = revision;
       view = { ...view, ...frame.payload, self: { ...view.self, ...frame.payload.self }, room: { ...view.room, ...frame.payload.room }, connection };
+      sounds.observe(view);
       if (roomEnded(view)) { finishSession(view, true); return; }
       reconnectAttempts = 0;
       message("");
@@ -610,7 +619,9 @@ async function connectWebSocket() {
         finishSession(view);
         enterRoom(false, true);
       } else {
-        finishSession({ ...view, ...payload, entryState: "ROOM_CLOSED", self: { ...view.self, ...payload.self }, room: { ...view.room, ...payload.room, status: "CLOSED" } }, true);
+        const finalView = { ...view, ...payload, entryState: "ROOM_CLOSED", self: { ...view.self, ...payload.self }, room: { ...view.room, ...payload.room, status: "CLOSED" } };
+        sounds.observe(finalView);
+        finishSession(finalView, true);
       }
     } else if (frame.type === "ERROR" || frame.type === "AUTH_EXPIRED") {
       const detail = frame.payload?.message || "操作未完成，请稍后重试";

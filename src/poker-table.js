@@ -225,7 +225,7 @@ export function safeAvatar(url) {
   try { const parsed = new URL(url); return ["https:", "http:"].includes(parsed.protocol) ? parsed.href : null; }
   catch { return null; }
 }
-export function createPokerTable({ document, onAction, onCommand, onError = () => {}, confirmStand = () => false, confirmClose = () => false }) {
+export function createPokerTable({ document, onAction, onCommand, onError = () => {}, onCountdown = () => {}, confirmStand = () => false, confirmClose = () => false }) {
   const $ = (id) => document.getElementById(id);
   let view = {}, game = null, connected = false, pending = false, pendingTimer = null;
   let lastHand = null, lastBoard = [], timer = null, deadline = null, currentTimer = null, currentSeconds = null, currentSeat = null;
@@ -452,6 +452,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     currentTimer.style.setProperty("--time", Math.min(100, seconds / (view.room?.settings?.turnSeconds || 30) * 100) + "%");
     currentSeconds.textContent = seconds + "s";
     currentSeat.setAttribute("data-urgent", String(seconds <= 10));
+    onCountdown("turn", [game?.handId ?? game?.handNumber, game?.turn, game?.turnDeadline].join(":"), seconds, connected && canAct());
     if (!seconds) { connected = false; updateActions(); $("table-notice").textContent = "行动时间已到，等待服务端更新…"; }
   }
   function updateNextHandClock() {
@@ -459,6 +460,8 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     $("next-hand-countdown").hidden = !state.visible;
     $("next-hand-countdown").textContent = state.text || "";
     $("next-hand-countdown").setAttribute("data-seconds", state.seconds == null ? "" : String(state.seconds));
+    onCountdown("nextHand", view.room?.nextHand?.startsAt, state.seconds,
+      connected && view.room?.nextHand?.status === "COUNTDOWN" && !roomEnded(view));
   }
   function render(nextView) {
     view = nextView; game = view.game || null; pending = false; clearTimeout(pendingTimer);
