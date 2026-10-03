@@ -1320,17 +1320,15 @@ test("到期不结束未完成手牌，最终关房快照后按服务端截止�
   assert.equal(elements["settlement-players"].children.length, 3);
   assert.ok(!sockets[0].sent.some(f => ["READY", "START_HAND", "RESUME_GAME"].includes(f.type)));
 });
-test("缺少结算字段不能用当前成员伪造整场统计，重试复用 entry 获取最终数据", async () => {
+test("缺少结算字段不能用当前成员伪造整场统计，结算页不提供重新获取入口", async () => {
   const closed = { ...finalSnapshot(), settlement: null };
-  const { elements, calls, sockets } = mount([{ status: 200, body: { code: 0, data: closed } },
-    { status: 200, body: { code: 0, data: finalSnapshot() } }]);
+  const { elements, calls, sockets } = mount([{ status: 200, body: { code: 0, data: closed } }]);
   await new Promise(setImmediate);
   assert.equal(elements["settlement-total-hands"].textContent, "—");
   assert.equal(elements["settlement-players"].children.length, 0);
-  assert.match(elements["settlement-notice"].textContent, /尚未返回完整结算/);
-  elements["refresh-settlement"].listeners.click(); await new Promise(setImmediate);
-  assert.equal(calls.length, 2); assert.ok(calls.every(c => c.url.endsWith("/api/poker/v1/entry")));
-  assert.equal(elements["settlement-players"].children.length, 3); assert.equal(sockets.length, 0);
+  assert.match(elements["settlement-notice"].textContent, /尚未返回完整结算.*刷新页面/);
+  assert.equal(elements["refresh-settlement"], undefined);
+  assert.equal(calls.length, 1); assert.equal(sockets.length, 0);
 });
 test("旧 ROOM_CLOSED 仅通知时重新读取权威结算，不把旧手牌视为完成", async () => {
   const { elements, sockets, calls } = mount([roomResponse(), { status: 200, body: { code: 0, data: finalSnapshot() } }]);
@@ -1343,26 +1341,16 @@ test("旧 ROOM_CLOSED 仅通知时重新读取权威结算，不把旧手牌视�
   assert.equal(elements["payout-layer"].children.length, 0);
 });
 
-test("未冻结报告不显示为最终统计，重新获取失败保留已确认的报告及诊断弹框", async () => {
+test("未冻结报告不显示为最终统计，也不会自动重新获取结算", async () => {
   const closed = finalSnapshot();
-  const { elements, sockets } = mount([
+  const { elements, calls, sockets } = mount([
     { status: 200, body: { code: 0, data: { ...closed, settlement: { ...closed.settlement, status: "DRAFT" } } } },
-    { status: 200, body: { code: 0, data: closed } },
-    { status: 503, body: { code: 503, message: "稍后重试" } },
   ]);
   await new Promise(setImmediate);
+  assert.equal(elements["settlement-panel"].hidden, false);
   assert.equal(elements["settlement-total-pot"].textContent, "—");
   assert.equal(elements["settlement-players"].children.length, 0);
-  elements["refresh-settlement"].listeners.click(); await new Promise(setImmediate);
-  assert.equal(elements["settlement-total-pot"].textContent, "24");
-  elements["refresh-settlement"].listeners.click(); await new Promise(setImmediate);
-  assert.equal(elements["settlement-panel"].hidden, false);
-  assert.equal(elements["settlement-total-pot"].textContent, "24");
-  assert.equal(elements["settlement-players"].children.length, 3);
-  assert.match(elements["settlement-notice"].textContent, /获取失败/);
-  assert.equal(elements["error-dialog"].open, true);
-  assert.match(elements["error-request"].textContent, /\/api\/poker\/v1\/entry/);
-  assert.equal(sockets.length, 0);
+  assert.equal(calls.length, 1); assert.equal(sockets.length, 0);
 });
 
 function historyResponse(handNumber = 3, overrides = {}) {

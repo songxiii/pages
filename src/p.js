@@ -162,7 +162,7 @@ function renderSettlement() {
   if (Number.isSafeInteger(settings.durationMinutes)) meta.append(summaryNode("span", "", settings.durationMinutes + " 分钟"));
   const rows = settlementRows(report), people = $("settlement-players"); people.replaceChildren();
   const available = report?.status === "FINAL" && Array.isArray(report.players);
-  text("settlement-notice", !available ? "服务端尚未返回完整结算数据，请稍后重新获取。" : !rows.length ? "本场暂无成员统计。" : "");
+  text("settlement-notice", !available ? "服务端尚未返回完整结算数据，请稍后刷新页面查看。" : !rows.length ? "本场暂无成员统计。" : "");
   if (!available) return;
   rows.forEach((player, index) => {
     const mine = String(view.self?.userId ?? view.self?.id) === player.userId;
@@ -185,7 +185,7 @@ function renderSettlement() {
 }
 function setBusy(value) {
   busy = value;
-  for (const id of ["create-room", "refresh-entry", "retry-entry", "connect-ws", "refresh-settlement"]) $(id).disabled = value;
+  for (const id of ["create-room", "refresh-entry", "retry-entry", "connect-ws"]) $(id).disabled = value;
   $("login-form").querySelector("button").disabled = value;
 }
 function updateSystemVersion(value) {
@@ -289,7 +289,7 @@ async function enterRoom(autoConnect = true, background = false) {
     return true;
   } catch (error) {
     if (roomEnded(view) && (!error.status || error.status >= 500)) {
-      text("settlement-notice", "结算数据获取失败，请稍后重新获取。");
+      text("settlement-notice", "结算数据获取失败，请稍后刷新页面查看。");
       if (!background) showError(error.message, error.diagnostic);
       return false;
     }
@@ -722,7 +722,6 @@ $("refresh-room").addEventListener("click", () => { reconnectAttempts = 0; retur
 $("retry-login").addEventListener("click", enterRoom);
 $("refresh-entry").addEventListener("click", enterRoom);
 $("retry-entry").addEventListener("click", enterRoom);
-$("refresh-settlement").addEventListener("click", () => enterRoom(false));
 $("connect-ws").addEventListener("click", () => { reconnectAttempts = 0; return connectWebSocket(); });
 $("copy-ws-url").addEventListener("click", async () => {
   if (!connection?.url) return;
