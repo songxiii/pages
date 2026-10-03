@@ -623,6 +623,20 @@ select {
   background:#5888dc;
   box-shadow:0 1px 4px #0005;
 }
+.pot-box { position:relative; }
+.pot-chips { position:absolute; top:50%; right:calc(100% + 5px); display:flex; gap:2px; align-items:flex-end; transform:translateY(-50%); pointer-events:none; }
+.pot-chip-stack { position:relative; width:19px; height:25px; }
+.pot-chip { position:absolute; left:0; bottom:calc(var(--chip-level) * 4px); width:19px; height:12px; border-width:2px; box-shadow:0 2px 0 #294e88,0 3px 4px #0006; }
+.pot-chip-stack:nth-child(2) .pot-chip { background:#bd5967; box-shadow:0 2px 0 #703b46,0 3px 4px #0006; }
+.pot-chip-stack:nth-child(3) .pot-chip { background:#d1aa58; box-shadow:0 2px 0 #7f6530,0 3px 4px #0006; }
+button.seat-avatar { display:grid; padding:0; cursor:pointer; font:inherit; color:inherit; -webkit-tap-highlight-color:transparent; }
+button.seat-avatar:focus-visible { outline:2px solid var(--gold); outline-offset:4px; }
+.player-profile { position:absolute; z-index:20; top:var(--profile-y); left:clamp(108px,var(--profile-x),calc(100% - 108px)); transform:translateX(-50%); width:208px; padding:14px 12px 10px; border:1px solid #e7c68b50; border-radius:14px; background:#191e29f5; box-shadow:0 8px 24px #0008; text-align:center; }
+.player-profile > .icon-button { position:absolute; top:1px; right:1px; width:28px; height:28px; font-size:20px; }
+.player-profile-avatar { position:relative; display:grid; place-items:center; margin:0 auto 7px; width:56px; height:56px; border:2px solid #e7c68b70; border-radius:50%; background:#303648; color:var(--gold); font-size:25px; overflow:hidden; }
+.player-profile-avatar img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+.player-profile strong { display:block; padding:0 4px; font-size:14px; overflow-wrap:anywhere; max-height:42px; overflow:auto; }
+.player-profile small { display:block; margin-top:7px; color:#b9c1d0; font-size:10px; }
 .hole-cards {
   position:absolute;
   bottom:33px;
@@ -673,6 +687,18 @@ select {
 .card.back:after {
   content:"♠";
   font-size:23px;
+}
+.hole-cards { pointer-events:none; }
+.card.hole-flip { perspective:600px; background:transparent; border-color:transparent; }
+.hole-flip-inner { position:absolute; inset:-1px; padding:inherit; gap:inherit; align-items:inherit; justify-content:inherit; border-radius:inherit; transform-style:preserve-3d; transition:transform .42s cubic-bezier(.4,0,.2,1); }
+.hole-flip.is-hidden .hole-flip-inner { transform:rotateY(180deg); }
+.hole-face { position:absolute; inset:0; display:flex; flex-direction:column; align-items:inherit; justify-content:inherit; gap:inherit; padding:inherit; border:1px solid #fff9; border-radius:inherit; backface-visibility:hidden; -webkit-backface-visibility:hidden; }
+.hole-front { background:linear-gradient(130deg,#fff,#dfe2eb); transition:visibility 0s .21s; }
+.is-hidden .hole-front { visibility:hidden; }
+.hole-back { transform:rotateY(180deg); align-items:center; justify-content:center; padding:0; border:2px solid #bfc7db; background:repeating-linear-gradient(45deg,#222b45,#222b45 3px,#2e3956 3px,#2e3956 6px); color:#d5bd8e; font-size:23px; }
+.card.hole-flip.back:after { content:none; }
+@media (prefers-reduced-motion:reduce) {
+  .hole-flip-inner,.hole-front { transition:none; }
 }
 .hole-cards .card:first-child {
   transform:rotate(-10deg);
@@ -1181,7 +1207,7 @@ body.room-mode { height:100dvh; min-height:0; }
 .room-mode .dealer-button { font-size:10px; }
 .seat-readiness { position:absolute; top:0; right:0; padding:2px 4px; border:1px solid #83cca060; border-radius:7px; color:#b4e8c4; background:#19402ee8; font-size:9px; z-index:6; }
 .seat-next-hand { position:absolute; top:0; right:0; padding:2px 4px; border:1px solid #e9bb6360; border-radius:7px; color:#ffe0a0; background:#45341be8; font-size:9px; z-index:6; white-space:nowrap; }
-.room-mode .hole-cards, .room-mode .seat.self .hole-cards { bottom:calc(100% - var(--seat-size) + 13px); z-index:6; }
+.room-mode .hole-cards, .room-mode .seat.self .hole-cards { bottom:calc(100% - var(--seat-size) * .55 + 13px); z-index:6; }
 .room-mode .seat.self .card { width:clamp(28px,calc(var(--seat-size) * .72),45px); height:clamp(45px,calc(var(--seat-size) * 1.0),65px); justify-content:flex-start; gap:1px; padding:2px 3px; }
 .room-mode .seat.self .rank { font-size:clamp(17px,4.8vw,23px); line-height:.9; }
 .room-mode .seat.self .suit { font-size:clamp(26px,7.4vw,36px); line-height:.82; }

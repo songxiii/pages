@@ -300,6 +300,60 @@ function gameSnapshot(overrides = {}) {
 function authenticate(socket) { socket.open(); socket.receive({ type: "AUTH_OK" }); }
 function descendants(root) { return [root, ...root.children.flatMap(descendants)]; }
 
+test("点击头像展示昵称及安全头像；本人手牌反复翻转、同步保留隐藏、新手恢复", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const first = gameSnapshot();
+  first.game.players[0].avatarUrl = "https://example.com/me.jpg";
+  first.game.players[1].nickname = "<对手>";
+  first.game.players[1].avatarUrl = "javascript:alert(1)";
+  sockets[0].receive({ type: "SNAPSHOT", payload: first });
+  const avatar = (index) => descendants(elements["table-seats"].children[index]).find(n => n.className === "seat-avatar");
+  const mine = () => descendants(elements["table-seats"].children[0]).filter(n => n.className.includes("hole-flip") && n.className.startsWith("card"));
+  const sentCount = sockets[0].sent.length;
+  avatar(1).listeners.click();
+  assert.equal(elements["player-profile"].hidden, false);
+  assert.equal(elements["player-profile-name"].textContent, "<对手>");
+  assert.equal(elements["player-profile-avatar"].children.length, 1);
+  assert.ok(mine().every(n => !n.className.includes("is-hidden")));
+  avatar(0).listeners.click();
+  assert.equal(elements["player-profile-name"].textContent, "本人");
+  assert.ok(elements["player-profile-avatar"].children.some(n => n.src === "https://example.com/me.jpg"));
+  assert.ok(mine().every(n => n.className.includes("is-hidden") && n.attributes["aria-label"] === "隐藏底牌"));
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: 2, game: { ...first.game, pot: 12 } } });
+  assert.ok(mine().every(n => n.className.includes("is-hidden")));
+  avatar(0).listeners.click();
+  assert.deepEqual(mine().map(n => n.attributes["aria-label"]), ["J♣", "7♥"]);
+  avatar(0).listeners.click();
+  elements["close-player-profile"].listeners.click();
+  assert.equal(elements["player-profile"].hidden, true);
+  assert.ok(mine().every(n => n.className.includes("is-hidden")));
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: 3, game: { ...first.game, handId: "H2" } } });
+  assert.ok(mine().every(n => !n.className.includes("is-hidden")));
+  assert.equal(sockets[0].sent.length, sentCount);
+});
+
+test("底池筹码堆随权威金额更新，零底池清空，点击桌面和Escape关闭头像信息", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const first = gameSnapshot(); sockets[0].receive({ type: "SNAPSHOT", payload: first });
+  const initialCount = descendants(elements["pot-chips"]).filter(n => n.className === "chip pot-chip").length;
+  assert.equal(elements["pot-chips"].hidden, false);
+  assert.ok(initialCount > 0);
+  const avatar = descendants(elements["table-seats"].children[1]).find(n => n.className === "seat-avatar");
+  avatar.listeners.click();
+  elements["table-stage"].listeners.click({ target: { closest: () => null } });
+  assert.equal(elements["player-profile"].hidden, true);
+  avatar.listeners.click(); elements["table-stage"].listeners.keydown({ key: "Escape" });
+  assert.equal(elements["player-profile"].hidden, true);
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: 2, game: { ...first.game, pot: 2000 } } });
+  assert.ok(descendants(elements["pot-chips"]).filter(n => n.className === "chip pot-chip").length > initialCount);
+  assert.equal(elements["table-pot"].textContent, "2,000");
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: 3, game: { ...first.game, pot: 0 } } });
+  assert.equal(elements["pot-chips"].hidden, true);
+  assert.equal(elements["pot-chips"].children.length, 0);
+});
+
 test("403 与解密错误只给对应提示，不展示登录表单或旧房间", async () => {
   for (const [status, detail] of [[403, "你不是活动成员"], [400, "ticket 解密失败"]]) {
     const { elements, sockets } = mount([{ status, body: { code: status, message: detail } }]);

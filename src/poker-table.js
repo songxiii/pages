@@ -236,6 +236,8 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
   let playerStates = new Map(), foldEffects = new Map();
   let seatButtons = [], openSeats = new Set();
   let standConfirmOpen = false, closeConfirmOpen = false;
+  let holeCardsHidden = false, selfCards = [], selectedProfile = null;
+  let profiles = new Map();
   function currentLayout() {
     const layout = tableLayout(view.room?.settings?.maxSeats || Math.max(2, ...(game?.players || []).map((p) => p.seatIndex + 1)), ownSeat(view));
     // Lifted hole cards need a little clearance below the header at the top seats.
@@ -274,6 +276,60 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
       el.setAttribute("aria-label", rank + suit);
     } else el.setAttribute("aria-label", "隐藏底牌");
     return el;
+  }
+  function ownCard(value, reveal, delay) {
+    const el = card(value, reveal, delay);
+    if (!/^[2-9TJQKA][shdc]$/i.test(value || "")) return el;
+    const front = node("span", "hole-face hole-front");
+    front.append(...el.children);
+    const back = node("span", "hole-face hole-back", "♠");
+    const inner = node("span", "hole-flip-inner"); inner.append(front, back); el.append(inner);
+    el.className += " hole-flip";
+    const entry = { el, front, back, label: el.getAttribute("aria-label") };
+    selfCards.push(entry); updateOwnCard(entry);
+    return el;
+  }
+  function updateOwnCard({ el, front, back, label }) {
+    el.className = el.className.replace(/\s(?:is-hidden|back)\b/g, "") + (holeCardsHidden ? " is-hidden back" : "");
+    el.setAttribute("aria-label", holeCardsHidden ? "隐藏底牌" : label);
+    front.setAttribute("aria-hidden", String(holeCardsHidden));
+    back.setAttribute("aria-hidden", String(!holeCardsHidden));
+  }
+  function closeProfile() {
+    selectedProfile = null; $("player-profile").hidden = true;
+    for (const { avatar } of profiles.values()) avatar.setAttribute("aria-expanded", "false");
+  }
+  function updateProfile() {
+    const profile = profiles.get(selectedProfile);
+    if (!profile) { closeProfile(); return; }
+    const { name, avatarUrl, mine, place } = profile;
+    const portrait = $("player-profile-avatar"); portrait.replaceChildren(node("span", "", [...name][0]));
+    if (avatarUrl) {
+      const img = node("img", ""); img.src = avatarUrl; img.alt = name + "的头像"; img.referrerPolicy = "no-referrer";
+      img.addEventListener("error", () => img.remove()); portrait.append(img);
+    }
+    $("player-profile-name").textContent = name;
+    $("player-profile-hint").hidden = !mine || !selfCards.length;
+    $("player-profile-hint").textContent = holeCardsHidden ? "手牌已隐藏 · 再点头像翻开" : "手牌已翻开 · 再点头像隐藏";
+    $("player-profile").style.setProperty("--profile-x", place.x + "%");
+    $("player-profile").style.setProperty("--profile-y", (place.y > 50 ? place.y - 27 : place.y + 10) + "%");
+    $("player-profile").hidden = false;
+    for (const [key, { avatar }] of profiles) avatar.setAttribute("aria-expanded", String(key === selectedProfile));
+  }
+  function renderPotChips(amount) {
+    const container = $("pot-chips"); container.replaceChildren();
+    container.hidden = !(Number(amount) > 0);
+    if (container.hidden) return;
+    // Decorative stacks grow with the pot; the adjacent amount remains authoritative.
+    const level = Math.min(12, Math.max(1, Math.ceil(Math.log2(1 + Number(amount) / Math.max(1, Number(view.room?.settings?.bigBlind) || 1)))));
+    const stackCount = Math.min(3, Math.ceil(level / 4));
+    for (let i = 0; i < stackCount; i++) {
+      const stack = node("span", "pot-chip-stack");
+      for (let j = 0; j < Math.min(4, level - i * 4); j++) {
+        const chip = node("span", "chip pot-chip"); chip.style.setProperty("--chip-level", String(j)); stack.append(chip);
+      }
+      container.append(stack);
+    }
   }
   function act(action, amount) {
     if (!canAct()) return;
@@ -414,6 +470,8 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     const members = view.roomMembers || [];
     const handKey = game?.handId ?? game?.handNumber ?? null;
     const newHand = handKey !== null && handKey !== lastHand;
+    if (!game || newHand || selfSeat === null) holeCardsHidden = false;
+    selfCards = []; profiles = new Map();
     if (!game || newHand) { playerStates = new Map(); foldEffects = new Map(); }
     const nextPlayerStates = new Map();
     const serverTime = Date.parse(view.serverTime || "");
@@ -473,10 +531,22 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
       }
       el.style.setProperty("--x", place.x + "%"); el.style.setProperty("--y", place.y + "%"); el.style.setProperty("--hue", String((place.seatIndex * 59 + 220) % 360));
       const name = person?.nickname || person?.name || member?.nickname || (mine ? view.self?.nickname : null) || "玩家";
-      const avatar = node("div", "seat-avatar"); avatar.append(node("span", "avatar-monogram", person ? [...name][0] : "+"));
+      const avatar = node(person ? "button" : "div", "seat-avatar"); avatar.append(node("span", "avatar-monogram", person ? [...name][0] : "+"));
       if (award) avatarTargets.set(place.seatIndex, avatar);
       const avatarUrl = safeAvatar(person?.avatarUrl || member?.avatarUrl || (mine ? view.self?.avatarUrl : null));
       if (avatarUrl) { const img = node("img", ""); img.src = avatarUrl; img.alt = ""; img.referrerPolicy = "no-referrer"; img.addEventListener("error", () => img.remove()); avatar.append(img); }
+      if (person) {
+        const key = String(identity(person) ?? "seat:" + place.seatIndex);
+        avatar.type = "button"; avatar.setAttribute("aria-label", "查看" + name + "的头像和昵称" + (mine && player?.hole?.length ? "，切换手牌显示" : ""));
+        avatar.setAttribute("aria-controls", "player-profile"); avatar.setAttribute("aria-expanded", "false");
+        profiles.set(key, { avatar, name, avatarUrl, mine, place });
+        avatar.addEventListener("click", () => {
+          if (mine && selfCards.length) {
+            holeCardsHidden = !holeCardsHidden; selfCards.forEach(updateOwnCard);
+          }
+          selectedProfile = key; updateProfile();
+        });
+      }
       const label = node("div", "seat-label");
       const position = person ? positions.get(place.seatIndex) : null;
       if (position) label.append(node("span", "seat-position", position));
@@ -506,7 +576,9 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
         const hole = node("div", "hole-cards");
         // Folded opponents stay private even if a malformed snapshot contains their cards.
         const visible = mine || (game.phase === "complete" && Boolean(game.result?.hands) && !folded);
-        player.hole.slice(0, 2).forEach((value, i) => hole.append(card(visible ? value : null, newHand, i * 130 + place.seatIndex * 60)));
+        player.hole.slice(0, 2).forEach((value, i) => hole.append(mine
+          ? ownCard(value, newHand, i * 130 + place.seatIndex * 60)
+          : card(visible ? value : null, newHand, i * 130 + place.seatIndex * 60)));
         el.append(hole);
       }
       el.append(label);
@@ -518,6 +590,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
       seats.append(el);
     }
     playerStates = nextPlayerStates;
+    updateProfile();
     const board = $("board-cards"); board.replaceChildren();
     const cards = (game?.board || []).slice(0, 5);
     for (let i = 0; i < 5; i++) {
@@ -526,6 +599,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     }
     $("table-blinds").textContent = "NLHE " + formatChips(settings.smallBlind) + " / " + formatChips(settings.bigBlind);
     $("table-pot").textContent = formatChips(game?.pot ?? 0);
+    renderPotChips(game?.pot ?? 0);
     $("pot-label").textContent = awards.length ? "已分配底池" : "底池";
     $("table-phase").textContent = game ? "第 " + (game.handNumber ?? "—") + " 手 · " + (PHASE_NAMES[game.phase] || "牌局进行中") : "等待开局";
     $("table-result").textContent = awards.length ? awards.map((award) => award.nickname + (award.amount === null ? "" : " +" + formatChips(award.amount))).join("、") + " 获胜" : game?.result?.message || "";
@@ -582,6 +656,11 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     dealCleanupTimer = setTimeout(() => layer.replaceChildren(), 2500);
   }
   $("fold-action").addEventListener("click", () => act("fold"));
+  $("close-player-profile").addEventListener("click", closeProfile);
+  $("table-stage").addEventListener("click", (event) => {
+    if (!event.target.closest(".seat-avatar, #player-profile")) closeProfile();
+  });
+  $("table-stage").addEventListener("keydown", (event) => { if (event.key === "Escape") closeProfile(); });
   $("call-action").addEventListener("click", () => act(game?.legal?.canCheck ? "check" : "call"));
   $("raise-toggle").addEventListener("click", () => {
     if (!canAct() || !game.legal.canRaise) return;
@@ -625,6 +704,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     setConnected(value, notice) { connected = value; updateActions(); if (notice) $("table-notice").textContent = notice; },
     reject(message) { clearTimeout(pendingTimer); pending = false; updateActions(); $("table-notice").textContent = message; },
     reset() { clearInterval(timer); clearInterval(nextHandTimer); clearTimeout(pendingTimer); clearTimeout(dealCleanupTimer); clearTimeout(payoutCleanupTimer);
+      holeCardsHidden = false; selfCards = []; closeProfile();
       $("deal-layer").replaceChildren(); $("payout-layer").replaceChildren(); $("next-hand-countdown").hidden = true;
       lastLayoutKey = null; lastHand = null; lastBoard = []; activeHandSeen = null; lastPaidHand = null; fallbackHand = null; fallbackDeadline = null;
       connected = false; pending = false; updateActions(); },
