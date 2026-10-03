@@ -1,4 +1,4 @@
-import { createPokerTable, formatChips, safeAvatar, memberAmounts, memberStateText } from "./poker-table.js?v=20261003-waiting-resume";
+import { createPokerTable, formatChips, safeAvatar, memberAmounts, memberStateText } from "./poker-table.js?v=20261003-compact-opponent-cards";
 import { POKER_API_BASE_URL } from "./poker-config.js";
 import { ticketFromLocation, ticketFragmentUrl, validateSettings, redactCredentials, normalizeWebSocketUrl } from "./poker-entry.js";
 import { roomEnded, sessionClock, settlementShowAt, settlementRows, settlementStats } from "./poker-session.js?v=20261003-room-lifecycle";

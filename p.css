@@ -1289,6 +1289,9 @@ body.room-mode { height:100dvh; min-height:0; }
 .room-mode .seat:not(.self) .hole-cards .card { padding:1px 2px; justify-content:flex-start; gap:0; }
 .room-mode .seat:not(.self) .hole-cards .rank { font-size:clamp(11px,3.3vw,14px); line-height:.9; }
 .room-mode .seat:not(.self) .hole-cards .suit { font-size:clamp(16px,4.5vw,24px); line-height:.75; }
+.room-mode .seat:not(.self) .hole-cards[data-compact="true"] { bottom:calc(100% + 5px); }
+.room-mode .seat:not(.self) .hole-cards[data-compact="true"] .card { width:clamp(10px,calc(var(--seat-size) * .25),15px); height:clamp(15px,calc(var(--seat-size) * .36),22px); padding:0; border-width:1px; border-radius:2px; }
+.room-mode .seat:not(.self) .hole-cards[data-compact="true"] .card.back:after { font-size:10px; }
 .room-mode .seat.bottom .seat-bet { top:-16px; left:calc(100% + 4px); transform:none; }
 .room-mode .seat-bet { padding:2px 4px; border-radius:10px; background:#090e18c9; border:1px solid #a8bdde33; z-index:6; font-variant-numeric:tabular-nums; }
 .room-mode .seat-state { position:static; line-height:10px; margin-top:1px; }

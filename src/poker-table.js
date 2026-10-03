@@ -618,6 +618,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
       if (person && !chipWait && waitingNextHand(view, member || person)) el.append(node("span", "seat-next-hand", "下局加入"));
       if (person && player?.hole?.length && (game.phase !== "complete" || sameParticipant)) {
         const hole = node("div", "hole-cards");
+        hole.setAttribute("data-compact", String(!mine && game.phase !== "complete"));
         // Folded opponents stay private even if a malformed snapshot contains their cards.
         const visible = mine || (game.phase === "complete" && Boolean(game.result?.hands) && !folded);
         player.hole.slice(0, 2).forEach((value, i) => hole.append(mine
