@@ -1350,7 +1350,7 @@ body.room-mode { height:100dvh; min-height:0; }
 }
 .raise-editor .section-head { margin-bottom:10px; }
 .raise-editor .section-head strong { font-size:14px; color:#ddd4c2; }
-.raise-editor .raise-presets { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); margin-bottom:8px; }
+.raise-editor .raise-presets { display:grid; grid-template-columns:repeat(var(--preset-count,4),minmax(0,1fr)); margin-bottom:8px; }
 .raise-editor .raise-presets button { display:block; text-align:center; }
 .raise-editor .raise-presets small { display:block; margin-top:3px; }
 .raise-editor .raise-presets button[aria-pressed="true"] { border-color:var(--gold); background:#403627; }

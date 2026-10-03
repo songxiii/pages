@@ -39,6 +39,19 @@ test("快捷加注包含本人本轮下注和跟注，按筹码单位取整并�
   assert.deepEqual(raisePresets({ ...game, legal: null }), []);
 });
 
+test("快捷加注合并因最小值、最大值和取整产生的重复金额，限制值不显示虚假比例", () => {
+  const game = { turn: 0, pot: 10, players: [{ seatIndex: 0, bet: 0 }],
+    legal: { toCall: 0, canRaise: true, minRaiseTo: 6, maxRaiseTo: 8, chipUnit: 1 } };
+  assert.deepEqual(raisePresets(game).map(({ amount, label }) => ({ amount, label })),
+    [{ amount: 8, label: "最大加注" }, { amount: 6, label: "最小加注" }]);
+  assert.deepEqual(raisePresets({ ...game, pot: 0 }).map((preset) => preset.amount), [6]);
+  assert.deepEqual(raisePresets({ ...game, pot: 100 }).map((preset) => preset.amount), [8]);
+  const rounded = raisePresets({ ...game, pot: 4, legal: { ...game.legal, minRaiseTo: 1, maxRaiseTo: 100 } });
+  assert.deepEqual(rounded.map((preset) => preset.amount), [5, 3, 2]);
+  assert.equal(rounded[2].label, "底池 50%");
+  assert.equal(raisePresets({ ...game, legal: { ...game.legal, minRaiseTo: 8 } })[0].label, "最大加注");
+});
+
 test("多人大盲小盲跳过未参局空座，不随本轮下注或弃牌变化", () => {
   const players = [0, 3, 7].map((seatIndex) => ({ seatIndex, bet: 80, folded: seatIndex === 3 }));
   assert.deepEqual(handPositions({ dealer: 0, players }), { dealer: 0, smallBlindSeat: 3, bigBlindSeat: 7 });

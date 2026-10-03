@@ -102,8 +102,14 @@ export function raisePresets(game) {
   const self = (game.players || []).find((p) => seatIndex(p) === game.turn);
   const bet = Number(self?.bet || 0), call = Number(legal.toCall || 0), pot = Number(game.pot || 0);
   const step = Number(legal.chipUnit) > 0 ? Number(legal.chipUnit) : 1;
-  return [1.25, .75, .5, .33].map((ratio) => ({ ratio, amount: Math.min(legal.maxRaiseTo,
-    Math.max(legal.minRaiseTo, Math.ceil((bet + call + (pot + call) * ratio) / step) * step)) }));
+  const presets = new Map();
+  for (const ratio of [1.25, .75, .5, .33]) {
+    const amount = Math.min(legal.maxRaiseTo,
+      Math.max(legal.minRaiseTo, Math.ceil((bet + call + (pot + call) * ratio) / step) * step));
+    const label = amount === legal.maxRaiseTo ? "最大加注" : amount === legal.minRaiseTo ? "最小加注" : "底池 " + Math.round(ratio * 100) + "%";
+    if (!presets.has(amount)) presets.set(amount, { ratio, amount, label });
+  }
+  return [...presets.values()];
 }
 export function roomControls(view, now = Date.now()) {
   const own = ownSeat(view);
@@ -276,10 +282,12 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     $("raise-toggle").disabled = !enabled || !legal.canRaise;
     if (!enabled) { $("raise-editor").hidden = true; $("raise-toggle").setAttribute("aria-expanded", "false"); }
     const presets = $("raise-presets"); presets.replaceChildren();
-    for (const { ratio, amount } of enabled ? raisePresets(game) : []) {
+    const options = enabled ? raisePresets(game) : [];
+    presets.style.setProperty("--preset-count", String(Math.max(1, options.length)));
+    for (const { label: description, amount } of options) {
       const button = node("button", ""); button.type = "button";
       const label = node("span", "", "加注"); label.append(node("b", "", formatChips(amount)));
-      button.append(label, node("small", "", Math.round(ratio * 100) + "%"));
+      button.append(label, node("small", "", description));
       button.setAttribute("data-raise-amount", String(amount)); button.setAttribute("aria-pressed", "false");
       button.addEventListener("click", () => chooseRaise(amount)); presets.append(button);
     }

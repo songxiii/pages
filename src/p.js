@@ -1,4 +1,4 @@
-import { createPokerTable, formatChips, safeAvatar, memberAmounts } from "./poker-table.js?v=20261002-session-summary";
+import { createPokerTable, formatChips, safeAvatar, memberAmounts } from "./poker-table.js?v=20261003-raise-presets";
 import { POKER_API_BASE_URL } from "./poker-config.js";
 import { ticketFromLocation, ticketFragmentUrl, validateSettings, redactCredentials, normalizeWebSocketUrl } from "./poker-entry.js";
 import { roomEnded, sessionClock, settlementShowAt, settlementRows, settlementStats } from "./poker-session.js?v=20261002-session-summary";

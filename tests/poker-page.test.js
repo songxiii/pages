@@ -755,6 +755,25 @@ test("加注先打开金额面板，快捷金额和全下只选择，确认后�
   assert.equal(elements["raise-editor"].hidden, true);
 });
 
+test("加注面板合并重复金额，选择后只高亮一个快捷选项", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const snapshot = gameSnapshot();
+  snapshot.game.pot = 10;
+  snapshot.game.legal = { ...snapshot.game.legal, toCall: 0, minRaiseTo: 6, maxRaiseTo: 8 };
+  sockets[0].receive({ type: "SNAPSHOT", payload: snapshot });
+  elements["raise-toggle"].listeners.click();
+  const buttons = elements["raise-presets"].children;
+  assert.equal(buttons.length, 2);
+  assert.deepEqual(buttons.map((button) => button.getAttribute("data-raise-amount")), ["8", "6"]);
+  assert.deepEqual(buttons.map((button) => button.children[1].textContent), ["最大加注", "最小加注"]);
+  assert.equal(elements["raise-presets"].style.values["--preset-count"], "2");
+  buttons[0].listeners.click();
+  assert.equal(Number(elements["raise-range"].value), 8);
+  assert.equal(buttons.filter((button) => button.getAttribute("aria-pressed") === "true").length, 1);
+  assert.ok(!sockets[0].sent.some((frame) => frame.type === "ACTION"));
+});
+
 test("成员列表展示头像、盈亏符号和累计带入，快照更新金额且缺失值不显示零", async () => {
   const { elements, sockets } = mount([roomResponse()]);
   await new Promise(setImmediate); authenticate(sockets[0]);
