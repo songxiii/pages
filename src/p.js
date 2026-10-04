@@ -2,7 +2,7 @@ import { createPokerTable, formatChips, safeAvatar, memberAmounts, memberStateTe
 import { POKER_API_BASE_URL } from "./poker-config.js";
 import { ticketFromLocation, ticketFragmentUrl, validateSettings, redactCredentials, normalizeWebSocketUrl } from "./poker-entry.js";
 import { roomEnded, sessionClock, settlementShowAt, settlementRows, settlementStats } from "./poker-session.js?v=20261004-host-start-timing";
-import { createPokerHistory } from "./poker-history.js?v=20261003-room-history";
+import { createPokerHistory } from "./poker-history.js?v=20261004-history-no-id";
 import { createPokerSound } from "./poker-sound.js?v=20261004-host-controls";
 
 const $ = (id) => document.getElementById(id);

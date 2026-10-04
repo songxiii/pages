@@ -49,7 +49,6 @@ export function createPokerHistory({ document, request, getRoom, formatChips, sa
     if (!hand) { el("history-status").textContent = "暂无已结算的历史牌局。"; return; }
     el("history-status").textContent = "";
     el("history-hand-number").textContent = "第 " + hand.handNumber + " 手";
-    el("history-hand-id").textContent = "牌局 ID：" + hand.handId;
     const time = Date.parse(hand.settledAt || hand.startedAt || "");
     el("history-time").textContent = Number.isFinite(time) ? new Date(time).toLocaleString("zh-CN", { hour12: false }) : "时间未提供";
     el("history-time").setAttribute("datetime", Number.isFinite(time) ? new Date(time).toISOString() : "");

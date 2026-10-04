@@ -1400,7 +1400,6 @@ body.room-mode { height:100dvh; min-height:0; }
 .history-meta { display:flex; flex-wrap:wrap; gap:7px 12px; margin:20px 2px; font-size:11px; color:#a6b2c3; font-variant-numeric:tabular-nums; }
 .history-meta strong { color:#ead2a7; font-size:13px; }
 .history-meta time { margin-left:auto; }
-#history-hand-id { width:100%; overflow-wrap:anywhere; }
 .history-grid-scroll { overflow-x:auto; padding:3px 0; }
 .history-columns,.history-player { display:grid; grid-template-columns:var(--history-columns); gap:5px; min-width:246px; }
 .history-columns { align-items:center; margin-bottom:12px; font-size:9px; color:#74849c; }
