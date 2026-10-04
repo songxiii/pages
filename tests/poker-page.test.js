@@ -497,38 +497,72 @@ test("仅房主可控制游戏，按实际成员列表限制两人开局，服�
     self: { ...first.self, role: "MEMBER", allowedCommands: ["START_HAND", "PAUSE_GAME", "RESUME_GAME"] } } });
   assert.equal(elements["host-controls"].hidden, true);
   assert.equal(elements["start-hand"].hidden, true);
-  assert.equal(elements["pause-game"].hidden, true);
+  assert.equal(elements["pause-game"], undefined);
   elements["start-hand"].listeners.click();
   assert.equal(sockets[0].sent.filter((frame) => frame.type === "START_HAND").length, 1);
 });
 
-test("暂停请求明确等待本局结束，申请后仍允许本手行动，结算后暂停并可继续游戏", async () => {
+test("整场倒计时等待首次开始成功，服务器时间校准且刷新与重复快照不重置", async () => {
+  let now = Date.now(); class ClockDate extends Date { static now() { return now; } }
+  const serverTime = () => new Date(now + 60000).toISOString();
+  const lobby = lobbySnapshot();
+  lobby.room.settings.durationMinutes = 120;
+  lobby.room.timing = { status: "WAITING", startedAt: null, endsAt: null };
+  lobby.roomMembers.push({ userId: "u2", seatIndex: 2, state: "SEATED", stack: 200 });
+  lobby.serverTime = serverTime();
+  const { elements, sockets, intervals } = mount([roomResponse({}, lobby)], "", { Date: ClockDate });
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  sockets[0].receive({ type: "SNAPSHOT", payload: lobby });
+  assert.equal(elements["session-countdown"].textContent, "等待房主开始游戏");
+  now += 3 * 60 * 60 * 1000;
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...lobby, revision: 2, serverTime: serverTime() } });
+  for (const tick of intervals.values()) tick();
+  assert.equal(elements["session-countdown"].textContent, "等待房主开始游戏");
+  elements["start-hand"].listeners.click();
+  assert.deepEqual(sockets[0].sent.at(-1).payload, {});
+  assert.equal(sockets[0].sent.at(-1).type, "START_HAND");
+  assert.equal(elements["session-countdown"].textContent, "等待房主开始游戏");
+  sockets[0].receive({ type: "ERROR", requestId: sockets[0].sent.at(-1).requestId,
+    payload: { message: "开局条件发生变化，请重试" } });
+  assert.equal(elements["session-countdown"].textContent, "等待房主开始游戏");
+  assert.equal(elements["start-hand"].disabled, false);
+  elements["start-hand"].listeners.click();
+  assert.equal(sockets[0].sent.at(-1).type, "START_HAND");
+  const started = { ...gameSnapshot(), revision: 3, serverTime: serverTime(),
+    room: { ...lobby.room, status: "PLAYING", playState: "RUNNING",
+      timing: { status: "OPEN", startedAt: serverTime(), endsAt: new Date(now + 60000 + 120 * 60000).toISOString() } } };
+  sockets[0].receive({ type: "SNAPSHOT", payload: started });
+  assert.equal(elements["session-countdown"].textContent, "剩余 02:00:00");
+  now += 65000;
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...started, revision: 4, serverTime: serverTime() } });
+  for (const tick of intervals.values()) tick();
+  assert.equal(elements["session-countdown"].textContent, "剩余 01:58:55");
+  const refreshed = mount([roomResponse({ expiresAt: new Date(now + 60000).toISOString() }, { ...started, serverTime: serverTime() })], "", { Date: ClockDate });
+  await new Promise(setImmediate);
+  assert.equal(refreshed.elements["session-countdown"].textContent, "剩余 01:58:55");
+  assert.ok(!refreshed.sockets[0].sent.some(frame => frame.type === "START_HAND"));
+});
+
+test("服务端授权暂停、继续和关闭也不恢复入口或发送对应命令", async () => {
   const { elements, sockets } = mount([roomResponse()]);
   await new Promise(setImmediate); authenticate(sockets[0]);
   const first = gameSnapshot({
-    room: { playState: "RUNNING", settings: { maxSeats: 2 } },
-    self: { ...self, seatIndex: 0, roomState: "IN_HAND", allowedCommands: ["PAUSE_GAME", "START_HAND"] },
-    roomMembers: [{ seatIndex: 0, state: "IN_HAND" }, { seatIndex: 1, state: "IN_HAND" }],
+    self: { ...self, seatIndex: 0, roomState: "IN_HAND", allowedCommands: ["PAUSE_GAME", "RESUME_GAME", "CLOSE_GAME", "START_HAND"] },
   });
-  sockets[0].receive({ type: "SNAPSHOT", payload: first });
-  assert.equal(elements["start-hand"].disabled, true);
-  assert.equal(elements["pause-game"].disabled, false);
-  elements["pause-game"].listeners.click();
-  assert.equal(sockets[0].sent.at(-1).type, "PAUSE_GAME");
-  assert.equal(sockets[0].sent.at(-1).payload.afterCurrentHand, true);
-  assert.equal(elements["table-phase"].textContent, "第 1 手 · 翻牌前");
-  sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: 2, room: { ...first.room, playState: "PAUSE_PENDING" } } });
-  assert.equal(elements["pause-game"].disabled, true);
-  assert.equal(elements["call-action"].disabled, false);
-  assert.equal(elements["play-state-notice"].hidden, false);
-  sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: 3,
-    self: { ...first.self, allowedCommands: ["RESUME_GAME"] },
-    room: { ...first.room, playState: "PAUSED" }, game: { ...first.game, phase: "complete", legal: null } } });
-  assert.equal(elements["call-action"].disabled, true);
-  assert.equal(elements["resume-game"].hidden, false);
-  assert.equal(elements["resume-game"].disabled, false);
-  elements["resume-game"].listeners.click();
-  assert.equal(sockets[0].sent.at(-1).type, "RESUME_GAME");
+  const sent = sockets[0].sent.length;
+  for (const [index, playState] of ["RUNNING", "PAUSE_PENDING", "PAUSED"].entries()) {
+    sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: index + 1,
+      room: { ...first.room, playState }, game: { ...first.game, phase: playState === "PAUSED" ? "complete" : "preflop" } } });
+    for (const id of ["pause-game", "resume-game", "close-game", "close-game-dialog", "play-state-notice"]) {
+      assert.equal(elements[id], undefined);
+    }
+    assert.doesNotMatch(elements["host-control-detail"].textContent, /暂停|关闭|房主继续/);
+    assert.doesNotMatch(elements["table-notice"].textContent, /暂停|关闭|房主继续/);
+    assert.equal(elements["start-hand"].hidden, true);
+    elements["start-hand"].listeners.click();
+    assert.equal(elements["call-action"].disabled, playState === "PAUSED");
+  }
+  assert.equal(sockets[0].sent.length, sent);
 });
 
 test("开局后本手和等待下一手都隐藏准备，新成员标明下局加入且不获当前手牌", async () => {
@@ -573,35 +607,23 @@ test("本手起身经自定义确认只发 STAND_UP，服务端确认后转旁�
   assert.ok(descendants(elements["table-seats"]).some(node => node.className === "seat-state" && node.textContent === "已弃牌"));
 });
 
-test("关闭游戏只供服务端授权的房主，自定义确认后等当前手结束，未授权不能发命令", async () => {
+test("服务端主动结束时继续完成当前手并显示结算提示", async () => {
   const { elements, sockets } = mount([roomResponse()]);
   await new Promise(setImmediate); authenticate(sockets[0]);
-  const first = gameSnapshot(); first.self.allowedCommands = ["PAUSE_GAME", "CLOSE_GAME"];
-  sockets[0].receive({ type: "SNAPSHOT", payload: first });
-  assert.equal(elements["pause-game"].disabled, false); assert.equal(elements["close-game"].disabled, false);
-  assert.equal(elements["start-hand"].hidden, true);
-  const cancelled = elements["close-game"].listeners.click();
-  elements["cancel-close-game"].listeners.click(); await cancelled;
-  assert.ok(!sockets[0].sent.some(frame => frame.type === "CLOSE_GAME"));
-  const confirmed = elements["close-game"].listeners.click();
-  elements["confirm-close-game"].listeners.click(); await confirmed;
-  assert.equal(sockets[0].sent.at(-1).type, "CLOSE_GAME");
-  assert.deepEqual(sockets[0].sent.at(-1).payload, { afterCurrentHand: true });
-  sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: 2, room: { ...first.room, timing: { status: "ENDING", reason: "HOST_CLOSED" } } } });
-  assert.equal(elements["call-action"].disabled, false); assert.equal(elements["close-game"].disabled, true);
+  const first = gameSnapshot();
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...first,
+    room: { ...first.room, timing: { status: "ENDING", reason: "HOST_CLOSED" } } } });
+  assert.equal(elements["call-action"].disabled, false);
   assert.match(elements["session-countdown"].textContent, /房主已结束本场/);
-  sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: 3, self: { ...first.self, role: "MEMBER" } } });
-  assert.equal(elements["close-game"].hidden, true); await elements["close-game"].listeners.click();
-  assert.equal(sockets[0].sent.filter(frame => frame.type === "CLOSE_GAME").length, 1);
+  assert.equal(elements["start-hand"].disabled, true);
 });
 
-test("旧服务没有本手起身和关闭授权时说明原因，不假装完成", async () => {
+test("旧服务没有本手起身授权时说明原因，不假装完成", async () => {
   const { elements, sockets } = mount([roomResponse()]);
   await new Promise(setImmediate); authenticate(sockets[0]);
   sockets[0].receive({ type: "SNAPSHOT", payload: gameSnapshot() });
   assert.equal(elements["stand-up"].disabled, true); assert.match(elements["stand-detail"].textContent, /尚未授权/);
-  assert.equal(elements["close-game"].disabled, true); assert.match(elements["close-game-detail"].textContent, /尚未开放/);
-  await elements["close-game"].listeners.click(); await elements["stand-up"].listeners.click();
+  await elements["stand-up"].listeners.click();
   assert.ok(!sockets[0].sent.some(frame => ["STAND_UP", "CLOSE_GAME"].includes(frame.type)));
 });
 
@@ -1178,7 +1200,7 @@ test("结算后起身或换人占座不把旧赢家和底牌显示到新用户�
   assert.ok(elements["table-seats"].children.every(s => s.className.includes(" empty")));
 });
 
-test("旧服务结算展示十秒不因快照更新重置，暂停及时切换提示", async () => {
+test("旧服务结算展示十秒不因快照更新重置，历史停止状态等待服务端继续", async () => {
   let now = Date.now(); class ClockDate extends Date { static now() { return now; } }
   const { elements, sockets, intervals } = mount([roomResponse()], "", { Date: ClockDate });
   await new Promise(setImmediate); authenticate(sockets[0]);
@@ -1190,7 +1212,7 @@ test("旧服务结算展示十秒不因快照更新重置，暂停及时切换�
   now += 4000; for (const tick of intervals.values()) tick();
   assert.equal(elements["next-hand-countdown"].textContent, "等待服务端开启下一手");
   sockets[0].receive({ type: "SNAPSHOT", payload: { ...complete, revision: 3, room: { ...complete.room, playState: "PAUSED" } } });
-  assert.equal(elements["next-hand-countdown"].textContent, "游戏已暂停");
+  assert.equal(elements["next-hand-countdown"].textContent, "等待服务端继续牌局");
 });
 
 test("摊牌时即使服务误传底牌也不公开弃牌对手，本人仍可看自己的牌", async () => {

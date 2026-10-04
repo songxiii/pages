@@ -1152,7 +1152,6 @@ button.seat.empty:focus-visible { border-radius:12px; }
 .menu-controls p { line-height:1.8; margin:0 0 3px; }
 .menu-control { display:flex; justify-content:space-between; align-items:center; gap:10px; text-align:left; }
 .menu-control small { font-size:10px; font-weight:400; color:#9ca5b7; }
-.play-state-notice { text-align:center; background:#e7c68b0c; border:1px solid #e7c68b22; color:#deca9e; border-radius:8px; font-size:11px; line-height:1.6; padding:7px 10px; }
 
 .page-head-spacer { flex:1; }
 button.seat.empty[aria-disabled="true"]:not(:disabled) { opacity:.4; }
@@ -1232,7 +1231,6 @@ body.room-mode { height:100dvh; min-height:0; }
 .room-mode .table-phase { margin-top:6px; }
 .room-mode .table-result { margin:3px 0; line-height:1.3; }
 .room-mode .table-notice { flex-shrink:0; font-size:10px; line-height:1.5; min-height:16px; margin-top:0; }
-.room-mode .play-state-notice { flex-shrink:0; font-size:10px; padding:3px 8px; }
 .room-mode .action-dock { flex-shrink:0; margin-top:6px; }
 .room-mode .table-action { height:47px; font-size:14px; }
 .room-mode .table-action b { font-size:13px; margin-top:1px; }

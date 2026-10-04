@@ -183,7 +183,7 @@ test("下一手时间使用服务端截止；暂停、人数不足和过期时�
   assert.equal(nextHandState({ game, room }, now).text, "下一手 · 10s");
   assert.equal(nextHandState({ game, room }, now + 8000).seconds, 2);
   assert.equal(nextHandState({ game, room }, now + 10000).text, "正在等待服务端发牌…");
-  assert.equal(nextHandState({ game, room: { ...room, playState: "PAUSED" } }, now).text, "游戏已暂停");
+  assert.equal(nextHandState({ game, room: { ...room, playState: "PAUSED" } }, now).text, "等待服务端继续牌局");
   assert.equal(nextHandState({ game, room: { nextHand: { status: "WAITING_PLAYERS" } } }, now).text, "等待至少两名可参局玩家");
   assert.equal(nextHandState({ game: { ...game, phase: "preflop" }, room }, now).visible, false);
   assert.equal(nextHandState({ game: { ...game, handId: "H2" }, room }, now).visible, false);

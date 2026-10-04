@@ -1,5 +1,5 @@
 // Activity table: the server owns cards, money and turns; the browser limits NLHE betting.
-import { roomEnding, roomEnded } from "./poker-session.js?v=20261003-room-lifecycle";
+import { roomEnding, roomEnded } from "./poker-session.js?v=20261004-host-start-timing";
 import { createPokerBettingRules, validPokerRaise } from "./poker-betting.js?v=20261003-tda";
 export const PHASE_NAMES = { preflop: "翻牌前", flop: "翻牌", turn: "转牌", river: "河牌", complete: "本局结束" };
 // Clockwise visual order starts with the receiving player's seat at bottom center.
@@ -158,7 +158,7 @@ export function roomControls(view, now = Date.now()) {
   const host = ["CREATOR", "HOST"].includes(view.self?.role) || view.self?.isHost === true;
   const inHand = Boolean(view.game && view.game.phase !== "complete");
   const playState = view.room?.playState || (view.room?.status === "PAUSED" ? "PAUSED" : inHand || view.room?.status === "PLAYING" ? "RUNNING" : "WAITING");
-  const paused = playState === "PAUSED", pausePending = playState === "PAUSE_PENDING";
+  const paused = playState === "PAUSED";
   const autoContinuing = playState === "RUNNING" && ["COUNTDOWN", "WAITING_PLAYERS"].includes(view.room?.nextHand?.status);
   const ending = roomEnding(view, now), closed = roomEnded(view);
   const allowed = Array.isArray(view.self?.allowedCommands) ? view.self.allowedCommands : [];
@@ -169,7 +169,7 @@ export function roomControls(view, now = Date.now()) {
   const started = roomStarted(view);
   const ready = own !== null && playerReady(view, member || { ...view.self, state: view.self?.roomState });
   const readyCount = members.filter((m) => seatIndex(m) !== null && playerReady(view, m)).length;
-  return { host, seatedCount: seated.length, readyCount, seated: own !== null, ready, started, inHand, paused, pausePending, autoContinuing, ending,
+  return { host, seatedCount: seated.length, readyCount, seated: own !== null, ready, started, inHand, paused, autoContinuing, ending,
     canSit,
     canStand: !closed && own !== null && allowed.includes("STAND_UP"),
     canReady: !ending && !started && own !== null && !ready && allowed.includes("READY"),
@@ -180,9 +180,6 @@ export function roomControls(view, now = Date.now()) {
       && (allowed.includes("UNREADY") || allowed.includes("STAND_UP")),
     canBuyIn: !ending && allowed.includes("BUY_IN") && buyInOptions(view).length > 0,
     canStart: !ending && !started && host && seated.length >= 2 && allowed.includes("START_HAND"),
-    canPause: !ending && host && !paused && !pausePending && (inHand || playState === "RUNNING") && allowed.includes("PAUSE_GAME"),
-    canResume: !ending && host && paused && !inHand && seated.length >= 2 && allowed.includes("RESUME_GAME"),
-    canClose: !ending && host && allowed.includes("CLOSE_GAME"),
   };
 }
 export function memberAmounts(member) {
@@ -223,7 +220,7 @@ export function nextHandState(view, now, fallbackDeadline = null) {
   if (view.room?.status === "CLOSED" || ["ENDED", "CANCELLED"].includes(view.activity?.status)) return { visible: false };
   if (view.game && view.game.phase !== "complete") return { visible: false };
   if (roomEnding(view, now)) return { visible: true, text: view.room?.timing?.reason === "HOST_CLOSED" ? "房主已结束本场，等待结算" : "本场到时，等待结算" };
-  if (view.room?.playState === "PAUSED" || view.room?.playState === "PAUSE_PENDING" || status === "PAUSED") return { visible: true, text: "游戏已暂停" };
+  if (view.room?.playState === "PAUSED" || view.room?.playState === "PAUSE_PENDING" || status === "PAUSED") return { visible: true, text: "等待服务端继续牌局" };
   if (status === "WAITING_PLAYERS") {
     const count = eligiblePlayerCount(view);
     return { visible: true, waitingPlayers: true, eligiblePlayerCount: count,
@@ -245,7 +242,7 @@ export function safeAvatar(url) {
   try { const parsed = new URL(url); return ["https:", "http:"].includes(parsed.protocol) ? parsed.href : null; }
   catch { return null; }
 }
-export function createPokerTable({ document, onAction, onCommand, onError = () => {}, onCountdown = () => {}, confirmStand = () => false, confirmClose = () => false }) {
+export function createPokerTable({ document, onAction, onCommand, onError = () => {}, onCountdown = () => {}, confirmStand = () => false }) {
   const $ = (id) => document.getElementById(id);
   const betting = createPokerBettingRules();
   let view = {}, game = null, connected = false, pending = false, pendingTimer = null;
@@ -256,7 +253,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
   let avatarTargets = new Map();
   let playerStates = new Map(), foldEffects = new Map();
   let seatButtons = [], openSeats = new Set();
-  let standConfirmOpen = false, closeConfirmOpen = false;
+  let standConfirmOpen = false;
   let holeCardsHidden = false, selfCards = [], selectedProfile = null;
   let profiles = new Map();
   function currentLayout() {
@@ -440,25 +437,13 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
       : view.room?.nextHand?.status === "WAITING_PLAYERS" ? "追加确认后立即到账，补足筹码后自动参局，无需重新准备。" : "追加筹码将在确认后立即到账。";
     $("start-hand").hidden = !controls.host || controls.started;
     $("start-hand").disabled = !enabledControl || !controls.canStart;
-    $("pause-game").hidden = !controls.host || controls.paused;
-    $("pause-game").disabled = !enabledControl || !controls.canPause;
-    $("pause-game").textContent = controls.pausePending ? "已申请本局结束后暂停" : "暂停游戏（本局结束后生效）";
-    $("resume-game").hidden = !controls.host || !controls.paused;
-    $("resume-game").disabled = !enabledControl || !controls.canResume;
-    $("close-game").hidden = !controls.host;
-    $("close-game").disabled = !enabledControl || !controls.canClose;
-    $("close-game-detail").hidden = !controls.host;
-    $("close-game-detail").textContent = controls.ending ? "本场已申请结束，当前手牌结算后进入最终结算。"
-      : controls.canClose ? "关闭后不再发下一手，当前手牌结算后进入最终结算。" : "服务端尚未开放关闭游戏。";
-    $("host-control-detail").textContent = controls.pausePending ? "当前这手继续进行，结算完成后暂停，不再发下一手。"
-      : controls.paused ? (controls.seatedCount < 2 ? "游戏已暂停，至少 2 人落座后可继续。" : "游戏已暂停，继续后恢复发牌。")
+    $("host-control-detail").textContent = controls.ending ? "本场即将结束，等待结算。"
+      : controls.paused ? "等待服务端继续牌局。"
       : controls.started && view.room?.nextHand?.status === "WAITING_PLAYERS" ? (eligibleCount !== null && eligibleCount >= 2
         ? "人数已满足，等待服务端发牌，无需重新开始。" : "有可用筹码的在座玩家不足 2 人时等待；人数恢复后由服务端自动开局，无需准备或再次开始。")
       : controls.seatedCount < 2 ? "至少需要 2 人落座，目前 " + controls.seatedCount + " 人。"
-      : controls.inHand ? (controls.canPause ? "牌局进行中，暂停会在本局结束后生效。" : "牌局进行中，服务端尚未授权暂停游戏。")
+      : controls.inHand ? "牌局进行中，每手结束后自动继续。"
       : controls.started ? "游戏已开始，每手结束后自动继续，无需重新准备或开始。" : controls.canStart ? "已有 " + controls.seatedCount + " 人落座，可以开始游戏。" : "已落座 " + controls.seatedCount + " 人，已准备 " + controls.readyCount + " 人，等待开局条件满足。";
-    $("play-state-notice").hidden = roomEnded(view) || !controls.paused && !controls.pausePending;
-    $("play-state-notice").textContent = controls.paused ? "游戏已暂停 · 等待房主继续" : "房主已申请暂停 · 本局结束后生效";
   }
   function command(type, payload = {}) {
     if (pending) { reportError("正在处理上一项操作，请稍候…"); return; }
@@ -466,7 +451,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     const controls = roomControls(view, Date.now() + serverOffset);
     const permission = { SIT_DOWN: controls.canSit && openSeats.has(payload.seatIndex), READY: controls.canReady,
       UNREADY: controls.canUnready, BUY_IN: controls.canBuyIn && buyInOptions(view).includes(payload.amount),
-      STAND_UP: controls.canStand, START_HAND: controls.canStart, PAUSE_GAME: controls.canPause, RESUME_GAME: controls.canResume, CLOSE_GAME: controls.canClose };
+      STAND_UP: controls.canStand, START_HAND: controls.canStart };
     if (!permission[type]) {
       if (type === "SIT_DOWN") reportError(controls.seated ? "你已落座，请先在菜单中确认起身。"
         : !openSeats.has(payload.seatIndex) ? "该座位已有人入座，请选择其他空座。"
@@ -474,7 +459,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
       return;
     }
     pending = true; updateActions();
-    $("table-notice").textContent = type === "SIT_DOWN" ? (Number(view.room?.settings?.seatingType) === 0 ? "正在随机落座…" : "正在落座…") : type === "PAUSE_GAME" ? "正在申请本局结束后暂停…" : "正在提交操作…";
+    $("table-notice").textContent = type === "SIT_DOWN" ? (Number(view.room?.settings?.seatingType) === 0 ? "正在随机落座…" : "正在落座…") : "正在提交操作…";
     pendingTimer = setTimeout(() => { pending = false; connected = false; updateActions(); reportError("操作尚未确认，请重新连接以同步房间。", true); }, 10000);
     // Current Java rejects extra lifecycle fields. Revision belongs to ACTION only.
     const commandPayload = type === "SIT_DOWN" && Number(view.room?.settings?.seatingType) === 0 ? {} : payload;
@@ -649,7 +634,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     $("table-phase").textContent = game ? "第 " + (game.handNumber ?? "—") + " 手 · " + (PHASE_NAMES[game.phase] || "牌局进行中") : "等待开局";
     $("table-result").textContent = awards.length ? awards.map((award) => award.nickname + (award.amount === null ? "" : " +" + formatChips(award.amount))).join("、") + " 获胜" : game?.result?.message || "";
     $("table-result").setAttribute("title", $("table-result").textContent);
-    $("table-notice").textContent = !connected ? "正在同步牌局…" : roomControls(view, Date.now() + serverOffset).paused ? "游戏已暂停，等待房主继续"
+    $("table-notice").textContent = !connected ? "正在同步牌局…" : roomControls(view, Date.now() + serverOffset).paused ? "等待服务端继续牌局"
       : !game ? (selfSeat === null ? (Number(settings.seatingType) === 0 ? "点击任意空座随机落座，由房主开始游戏" : "点击虚线空座落座，由房主开始游戏") : "已入座，等待房主开始游戏")
       : game.phase === "complete" && view.room?.nextHand?.status === "WAITING_PLAYERS"
         ? (selfSeat !== null && needsChips(view, (members.find(member => Number(seatIndex(member)) === selfSeat && seatIndex(member) !== null) || { ...view.self, seatIndex: selfSeat }))
@@ -737,14 +722,8 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     }
     finally { standConfirmOpen = false; }
   });
-  $("close-game").addEventListener("click", async () => {
-    if (!connected || pending || closeConfirmOpen || !roomControls(view, Date.now() + serverOffset).canClose) return;
-    closeConfirmOpen = true;
-    try { if (await confirmClose() && connected && !pending && roomControls(view, Date.now() + serverOffset).canClose) command("CLOSE_GAME", { afterCurrentHand: true }); }
-    finally { closeConfirmOpen = false; }
-  });
-  for (const [id, type] of [["ready-player", "READY"], ["unready-player", "UNREADY"], ["start-hand", "START_HAND"], ["pause-game", "PAUSE_GAME"], ["resume-game", "RESUME_GAME"]]) {
-    $(id).addEventListener("click", () => command(type, type === "PAUSE_GAME" ? { afterCurrentHand: true } : {}));
+  for (const [id, type] of [["ready-player", "READY"], ["unready-player", "UNREADY"], ["start-hand", "START_HAND"]]) {
+    $(id).addEventListener("click", () => command(type));
   }
   $("buy-in-form").addEventListener("submit", (event) => { event.preventDefault(); command("BUY_IN", { amount: Number($("buy-in-amount").value) }); });
 

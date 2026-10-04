@@ -1,10 +1,20 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { roomEnded, sessionClock, settlementShowAt, settlementRows, settlementStats } from "../src/poker-session.js";
+import { roomEnded, roomEnding, sessionClock, settlementShowAt, settlementRows, settlementStats } from "../src/poker-session.js";
 import { roomControls } from "../src/poker-table.js";
 import { validateSettings } from "../src/poker-entry.js";
 
 const now = Date.parse("2026-10-02T00:00:00Z");
+test("未开始的房间等待服务端首次开局时间，不从进入时间推算截止", () => {
+  const view = { room: { timing: { status: "WAITING", startedAt: null, endsAt: null }, settings: { durationMinutes: 120 } } };
+  for (const time of [now, now + 3 * 60 * 60 * 1000]) {
+    assert.deepEqual(sessionClock(view, time), { visible: true, text: "等待房主开始游戏", status: "WAITING", seconds: null });
+    assert.equal(roomEnding(view, time), false);
+  }
+  assert.equal(sessionClock({ room: { timing: { status: "OPEN", endsAt: null } } }, now).visible, false);
+  // An older service's real deadline is still authoritative until the server is upgraded.
+  assert.equal(sessionClock({ room: { timing: { status: "OPEN", endsAt: new Date(now + 60000).toISOString() } } }, now).seconds, 60);
+});
 test("房间计时按绝对截止，暂停不冻结，到零不在前端结束当前手", () => {
   const view = { room: { playState: "PAUSED", timing: { endsAt: new Date(now + 3661000).toISOString() } }, game: { phase: "flop" } };
   assert.equal(sessionClock(view, now).text, "剩余 01:01:01");
@@ -18,7 +28,7 @@ test("到时即使快照误授权也禁止新开局、继续、带入与入座�
     room: { playState: "PAUSED", timing: { endsAt: new Date(now).toISOString() } },
     roomMembers: [{ userId: "a", seatIndex: 0 }, { userId: "b", seatIndex: 1 }] };
   const controls = roomControls(view, now);
-  assert.equal(controls.canStart, false); assert.equal(controls.canResume, false); assert.equal(controls.canReady, false); assert.equal(controls.canBuyIn, false);
+  assert.equal(controls.canStart, false); assert.equal(controls.canReady, false); assert.equal(controls.canBuyIn, false);
   assert.equal(roomControls({ ...view, self: { ...view.self, seatIndex: null } }, now).canSit, false);
   assert.equal(settlementShowAt({ room: { timing: { endedAt: new Date(now).toISOString() } } }, now + 4000), now + 10000);
   assert.equal(settlementShowAt({ settlement: { showAt: new Date(now + 8000).toISOString() } }, now), now + 8000);

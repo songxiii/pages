@@ -2,6 +2,8 @@
 
 更新核对日期：2026-10-03。依据为相邻 daoleme 当前源码，未以真实 ticket 验证线上部署。下文保留时长与结算的实现契约；最新开局后管理、起身弃牌、下局加入的差异与设计见 [本轮对接文档](POKER_JOIN_LEAVE_CONTROL.md)。
 
+**2026-10-04 调整**：前端删除暂停、继续和关闭游戏入口；整场时长改为房主首次开始成功后计时。前端等待服务端截止，Java 起点调整尚需实现和部署，具体契约见 [房主开始与整场计时调整](POKER_HOST_START_TIMING.md)，优先于历史开房计时及手动管理规则。
+
 最新恢复规则见 [人数不足与补筹码恢复](POKER_WAITING_RESUME.md)。当前 Java 已实现起身、落座、关闭；仍需调整 WAITING_PLAYERS 恢复时额外十秒的排期。
 
 ## 1. 最新源码能力与剩余工作
@@ -12,6 +14,7 @@
 | 带入、准备/取消、暂停/继续 | BUY_IN/READY/UNREADY/PAUSE_GAME/RESUME_GAME | 已实现，准备展示仅用于首次启动 |
 | 赢家金额、十秒自动开手 | payouts/settledAt/PokerNextHand/服务端调度 | 已实现，复用 |
 | 游戏时长与到期收尾 | durationMinutes/PokerRoomTiming/requestEndOrFinalize | 已实现，复用 |
+| 首次开始后计时 | START_HAND 成功时持久化 startedAt/endsAt；开房时不计时 | 本轮要求，Java 待调整；前端已支持 WAITING |
 | 全场统计、完整账本最终报告 | accumulate/freezeSettlement、Repository 持久字段 | 已实现，复用 |
 | 超时一律弃牌、全下承诺 | timeout 一律 fold、allInCommitted | 已实现 |
 | 主动关闭游戏 | CLOSE_GAME + HOST_CLOSED | 已实现，复用结束屏障 |
@@ -40,10 +43,10 @@
 ```
 
 - 前端选项：30/60/90/120/180/240/360/480 分钟，默认 120；Java normalize 同样校验整数及选项、默认值，sameAs 必须比较时长。
-- **从开房成功的 createdAt 开始计时**，endsAt=createdAt+durationMinutes；暂停、无人在线、等待准备、缺人数均继续计时。
+- **从首次 START_HAND 成功的 startedAt 开始计时**，endsAt=startedAt+durationMinutes；未开始时 startedAt/endsAt 为 NULL，timing.status=WAITING。开始后的无人在线、等待下一手和缺人数均继续计时。此起点为本轮待实现要求，不能据此认定线上已生效。
 - 配置创建后固定，重试开房、刷新、重连不能重置 endsAt，也不能用 updatedAt 延长时间。
-- 时间采用服务端 UTC，JSON 为带时区 ISO-8601。createdAt、endsAt 持久化后复用；客户端只显示倒计时，不调用关房动作。
-- 旧房间的迁移策略必须明确。建议新房必填；已有缺截止的房间保留 NULL，不在每次读取时临时生成截止。如要给旧房加时长，执行一次性明确迁移，按原 createdAt 固定计算，过期仍需安全完成当前手。
+- 时间采用服务端 UTC，JSON 为带时区 ISO-8601。createdAt 仅记录开房时间；startedAt、endsAt 持久化后复用；客户端只显示倒计时，不调用关房动作。
+- 旧房间的迁移策略必须明确。建议新房必填；已有缺截止的房间保留 NULL，不在每次读取时临时生成截止。如要给旧房加时长，执行一次性明确迁移，按持久化的首次开局时间固定计算；不得根据刷新时间猜测起点，过期仍需安全完成当前手。
 
 入口、建房返回和完整 SNAPSHOT 增加：
 
@@ -64,7 +67,7 @@
 }
 ```
 
-上面省略所有原有 settings/game 等字段；正式响应仍是完整快照。timing.status：OPEN 未到期，ENDING 已请求结束且等待当前手牌，ENDED 已完成最终关房。到期还有手牌时 room.status 仍 PLAYING、game 保留运行状态；endedAt 只有真正结算/关房后才有值。reason 使用 DURATION_REACHED/ACTIVITY_ENDED/ACTIVITY_CANCELLED 等稳定代码。
+上面省略所有原有 settings/game 等字段；正式响应仍是完整快照。timing.status：WAITING 未首次开始（startedAt/endsAt 为 null），OPEN 已开始且未到期，ENDING 已请求结束且等待当前手牌，ENDED 已完成最终关房。到期还有手牌时 room.status 仍 PLAYING、game 保留运行状态；endedAt 只有真正结算/关房后才有值。reason 使用 DURATION_REACHED/ACTIVITY_ENDED/ACTIVITY_CANCELLED 等稳定代码。
 
 前端把 endsAt 减 serverTime 进行显示，本机时钟偏差不应影响时间。无需每秒发送 WS；生成快照时返回准确 serverTime，首次到期/最终结束必须递增 revision 并推送。时长倒计时与 game.turnDeadline 的行动倒计时完全独立。
 
@@ -193,8 +196,8 @@ Repository mapper/COLUMNS/INSERT/运行状态更新都要同步。统一提交 r
 
 ## 7. 验收与上线顺序
 
-1. 先完成增量迁移与 Java durationMinutes 支持，再启用新开房表单；30–480 分钟选项正确，重试/刷新/暂停均不延长截止。
-2. 开房未开局、暂停、等待人数、全员离线均能按截止关闭；正在运行的手牌能继续 ACTION/超时，结算完成后关闭且不会新发牌。
+1. 先完成增量迁移与 Java durationMinutes 支持，再启用新开房表单；30–480 分钟选项正确，重试/刷新均不延长截止。
+2. 开房未开局不按游戏时长倒计时（活动结束仍可关闭）；开局后等待人数、全员离线均能按截止关闭；正在运行的手牌能继续 ACTION/超时，结算完成后关闭且不会新发牌。
 3. 结束边界与 START_HAND/自动续局/BUY_IN/PAUSE/RESUME 并发，截止前后规则一致，筹码、统计、关闭只提交一次；多实例与重启不重复结算。
 4. 最后一手含弃牌、全下、主池/边池/平局/未跟注退款，流水为最终 pot，不将退回、追加混入奖额；累计统计和真实账本一致。
 5. 已起身、离线、换座、退出活动者都有真实手数/带入/盈亏；所有玩家 netChips 之和在无扣费规则下为 0，总最终余额等于总带入，统计中没有遗漏的账本。

@@ -15,7 +15,9 @@ export function sessionClock(view, now = Date.now()) {
     const reason = view?.room?.timing?.reason === "HOST_CLOSED" ? "房主已结束本场" : "时间已到";
     return { visible: true, text: reason + (view?.game && view.game.phase !== "complete" ? " · 本手结束后结算" : " · 等待结算"), status: "ENDING", seconds: 0 };
   }
-  if (!Number.isFinite(end)) return { visible: false, status: "UNKNOWN", seconds: null };
+  if (!Number.isFinite(end)) return view?.room?.timing?.status === "WAITING"
+    ? { visible: true, text: "等待房主开始游戏", status: "WAITING", seconds: null }
+    : { visible: false, status: "UNKNOWN", seconds: null };
   const seconds = Math.max(0, Math.ceil((end - now) / 1000));
   const pad = value => String(value).padStart(2, "0");
   return { visible: true, status: "OPEN", seconds,

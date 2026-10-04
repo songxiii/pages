@@ -2,6 +2,8 @@
 
 本次前端已经实现四个用户视图：错误/等待提示、创建人的下拉开房页、自动连接的活动牌桌、按盈亏排名的最终结算页。此文是 **活动入口 v1** 的对接约定，和 `docs/WEBSOCKET_PROTOCOL.md` 里首页双人演示的 **小写消息协议** 分开使用，不能混用。
 
+**2026-10-04 前端调整**：房主仅保留首次开始入口，不再发送 PAUSE_GAME/RESUME_GAME/CLOSE_GAME。整场计时要求从首次 START_HAND 成功后开始，Java 尚需调整，最新契约见 [房主开始与整场计时调整](POKER_HOST_START_TIMING.md)。下文相关手动管理协议仅保留作旧服务参考。
+
 仓库已有 `/entry`、`/rooms`、`AUTH`、`AUTH_OK`、`PING`、`SNAPSHOT` 的前端接入。2026-09-30 Java 已补齐下文的完整牌局快照及 `SIT_DOWN/READY/STAND_UP/START_HAND/ACTION`，代码与部署说明见相邻 Java 仓库 `docs/POKER_ACTIVITY_V1.md`。前端曾用模拟服务验证；真实活动 ticket、MySQL 迁移与公网 WSS 联调仍待部署验证。
 
 Java 的当前鉴权口径为 **ticket-only**：entry/rooms 不需要 Authorization，身份来自服务端校验的 ticket。数据库需新增 `poker_activity_state/poker_activity_command`；牌局加密默认从已有 `POKER_WS_SECRET` 派生，无需增加密钥配置，`POKER_STATE_KEY` 是可选优先覆盖。外部 `seatIndex` 从 0 开始，数据库 `seat_no` 保持 1 起；Java 早期设计稿中的 `SET_READY/PLAYER_ACTION/commandId/actionId` 和增量事件不用于此页面。

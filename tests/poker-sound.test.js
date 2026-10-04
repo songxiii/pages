@@ -60,11 +60,13 @@ test("胜负、平局和旁观派奖使用本手身份，不继承同座位其�
   assert.deepEqual(pokerSoundEvents(first, ended), ["allIn", "draw"]);
 });
 
-test("本人入座、准备、带入和暂停确认后响，对手成员更新和在线状态不误响", () => {
+test("本人入座、准备、带入和开始确认后响，对手成员更新和在线状态不误响", () => {
   const first = snapshot(), next = copy(first);
   next.roomMembers[0].ready = true; assert.deepEqual(pokerSoundEvents(first, next), ["confirm"]);
   next.roomMembers[0].totalBuyIn += 200; assert.deepEqual(pokerSoundEvents(first, next), ["confirm", "chips"]);
-  const paused = copy(first); paused.room.playState = "PAUSED"; assert.deepEqual(pokerSoundEvents(first, paused), ["confirm"]);
+  const waiting = copy(first); waiting.room.playState = "WAITING";
+  assert.deepEqual(pokerSoundEvents(waiting, first), ["confirm"]);
+  const legacy = copy(first); legacy.room.playState = "PAUSED"; assert.deepEqual(pokerSoundEvents(first, legacy), []);
   const online = copy(first); online.roomMembers.push({ userId: "other", seatIndex: 1, ready: true }); online.roomMembers[0].online = true;
   assert.deepEqual(pokerSoundEvents(first, online), []);
 });

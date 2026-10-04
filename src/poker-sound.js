@@ -50,7 +50,7 @@ export function pokerSoundEvents(previous, next) {
   const member = next.roomMembers?.find(p => String(soundId(p)) === String(soundId(next.self))) || next.self;
   if (soundSeat(oldMember) !== soundSeat(member) || Boolean(oldMember?.ready) !== Boolean(member?.ready)) events.push("confirm");
   if (Number(member?.totalBuyIn) > Number(oldMember?.totalBuyIn)) events.push("chips");
-  if (previous.room?.playState !== next.room?.playState && next.room?.playState) events.push("confirm");
+  if (previous.room?.playState !== next.room?.playState && next.room?.playState === "RUNNING") events.push("confirm");
   return [...new Set(events)];
 }
 
