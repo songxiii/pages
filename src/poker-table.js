@@ -244,6 +244,8 @@ export function safeAvatar(url) {
 }
 export function createPokerTable({ document, onAction, onCommand, onError = () => {}, onCountdown = () => {}, confirmStand = () => false }) {
   const $ = (id) => document.getElementById(id);
+  // Keep these nodes when rebuilding the combined check/call button label.
+  const checkCountdownRing = $("check-countdown-ring"), checkCountdownSeconds = $("check-countdown-seconds");
   const betting = createPokerBettingRules();
   let view = {}, game = null, connected = false, pending = false, pendingTimer = null;
   let lastHand = null, lastBoard = [], timer = null, deadline = null, currentTimer = null, currentSeconds = null, currentSeat = null;
@@ -382,10 +384,11 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
   function updateActions() {
     const enabled = Boolean(canAct()), legal = game?.legal || {};
     $("fold-action").disabled = !enabled || legal.canFold === false;
-    updateFoldClock();
     $("call-action").disabled = !enabled || !(legal.canCheck || legal.canCall);
-    $("call-action").replaceChildren(node("span", "", legal.canCheck ? "过牌" : "跟注"));
+    $("call-action").replaceChildren(node("span", "action-label", legal.canCheck ? "过牌" : "跟注"));
     if (!legal.canCheck && legal.canCall) $("call-action").append(node("b", "", formatChips(legal.toCall)));
+    $("call-action").append(checkCountdownRing, checkCountdownSeconds);
+    updateActionClock();
     $("raise-toggle").disabled = !enabled || !legal.canRaise;
     $("raise-toggle").setAttribute("title", legal.raiseReason || "选择加注金额");
     for (const id of ["raise-range", "all-in-action", "confirm-raise"]) $(id).disabled = !enabled || !legal.canRaise;
@@ -467,34 +470,34 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     onCommand(type, commandPayload);
   }
 
-  function updateFoldClock() {
+  function updateActionClock() {
     const seat = ownSeat(view);
     const participant = handParticipant(view, { ...view.self, seatIndex: seat });
     const end = Date.parse(game?.turnDeadline || "");
     const visible = Number.isFinite(end) && seat !== null && seat === game?.turn && game.phase !== "complete"
       && participant && !participant.folded && !pending && !roomEnded(view)
       && !roomControls(view, Date.now() + serverOffset).paused;
-    $("fold-countdown-ring").hidden = !visible;
-    $("fold-countdown-seconds").hidden = !visible;
-    $("fold-action").setAttribute("data-countdown", String(Boolean(visible)));
-    if (!visible) {
-      $("fold-action").style.setProperty("--fold-countdown-offset", "100");
-      $("fold-countdown-seconds").textContent = "";
-      $("fold-action").setAttribute("aria-label", "弃牌");
-      $("fold-action").setAttribute("data-urgent", "false");
-      return;
-    }
     const remaining = Math.max(0, end - Date.now() - serverOffset);
     const seconds = Math.ceil(remaining / 1000);
     const duration = Number(view.room?.settings?.turnSeconds);
     const progress = Math.min(100, remaining / ((Number.isFinite(duration) && duration > 0 ? duration : 30) * 1000) * 100);
-    $("fold-action").style.setProperty("--fold-countdown-offset", String(100 - progress));
-    $("fold-action").setAttribute("data-urgent", String(seconds <= 10));
-    $("fold-action").setAttribute("aria-label", "弃牌，剩余 " + seconds + " 秒");
-    $("fold-countdown-seconds").textContent = seconds + "s";
+    const target = game?.legal?.canCheck === true ? "check" : "fold";
+    for (const action of ["check", "fold"]) {
+      const button = $(action === "check" ? "call-action" : "fold-action");
+      const active = Boolean(visible && action === target);
+      const label = action === "fold" ? "弃牌" : game?.legal?.canCheck ? "过牌"
+        : "跟注" + (game?.legal?.canCall ? " " + formatChips(game.legal.toCall) : "");
+      $(action + "-countdown-ring").hidden = !active;
+      $(action + "-countdown-seconds").hidden = !active;
+      $(action + "-countdown-seconds").textContent = active ? seconds + "s" : "";
+      button.style.setProperty("--action-countdown-offset", active ? String(100 - progress) : "100");
+      button.setAttribute("data-countdown", String(active));
+      button.setAttribute("data-urgent", String(active && seconds <= 10));
+      button.setAttribute("aria-label", label + (active ? "，剩余 " + seconds + " 秒" : ""));
+    }
   }
   function updateClock() {
-    updateFoldClock();
+    updateActionClock();
     if (!currentTimer || !Number.isFinite(deadline)) return;
     const seconds = Math.max(0, Math.ceil((deadline - Date.now() - serverOffset) / 1000));
     currentTimer.style.setProperty("--time", Math.min(100, seconds / (view.room?.settings?.turnSeconds || 30) * 100) + "%");

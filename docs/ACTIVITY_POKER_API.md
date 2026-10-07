@@ -128,7 +128,7 @@ Java 校验 token 所属用户、活动和房间后，依次发送 `AUTH_OK` 与
 - 前端按 `room.settings.maxSeats` 选用 2–9 人布局，保留空座。本人 `self.seatIndex` 始终旋转到屏幕正下方，其他座位按服务端座位顺序排列；旋转不改变命令中的真实座位编号。旁观者以 0 号座位为底部锚点。
 - `dealer`、`smallBlindSeat`、`bigBlindSeat` 分别标记庄家 D、小盲 SB、大盲 BB，都是零基座位号。请 Java 在每手快照明确提供这三个字段，特殊规则下没有对应位置时明确返回 `null`。双人局庄家与小盲在同一座位，前端同时显示 D 和 SB。兼容旧快照：盲位优先从 `players[].position=SB/BB` 读取，否则根据本手 `game.players` 的参局座位与庄家推导，跳过空座，已弃牌者仍保留本手盲位；不会用下注额猜盲位。
 - 位置标签显示「庄位 / 小盲 / 大盲」，双人庄位兼小盲显示「庄位/小盲」。其他位置优先使用 `game.players[].position`；旧 Java 留空时，前端按本手参局成员从大盲后开始补齐 UTG、UTG+1、UTG+2、LJ、HJ、CO，详见独立交付文档。
-- `turn` 和 `dealer` 都是座位号。`turnDeadline` 为 UTC/带时区 ISO 时间，前端结合 serverTime 显示剩余行动秒数，最后十秒标红。最新规则为在线/离线均超时弃牌，由 Java 执行。
+- `turn` 和 `dealer` 都是座位号。`turnDeadline` 为 UTC/带时区 ISO 时间，前端结合 serverTime 显示剩余行动秒数，最后十秒标红。2026-10-07 最新规则为可过牌时超时过牌、需要跟注时超时弃牌，在线/离线相同，由 Java 执行。当前 Java 仍一律 fold，需按 [超时动作调整](POKER_ACTION_EFFECTS_TIMEOUT.md) 修改；前端计时圈已按可过牌状态切换按钮。
 - `players[].bet` 是本轮累计下注，换下注轮清零；前端在玩家前方展示，结算隐藏。对手 folded=true 时底牌始终隐藏，即使 result.hands 存在。
 - 建议增加可选布尔 `players[].allInCommitted`，记录本手曾全下，即使派奖后余额为正也保留；前端已兼容。具体源码调整与验收见 [行动特效与离线超时弃牌](POKER_ACTION_EFFECTS_TIMEOUT.md)。
 - `pot` 是服务端计算的当前总底池。`bet` 是该玩家本轮总下注，`stack` 是尚未下注的筹码；不要只传动作增量。

@@ -54,3 +54,5 @@ API 域名配置在 [src/poker-config.js](src/poker-config.js)。如果页面与
 房主菜单已移除暂停、继续和关闭游戏入口及对应命令。整场倒计时要求从房主首次开始成功时计时：前端发送已有 `START_HAND`，等待服务端返回 `timing.startedAt/endsAt`，不在点击或进入房间时自行生成截止。前端已支持 `timing.status=WAITING` 的未开始提示；后端仍需把计时起点从开房改为首次开局，详见 [房主开始与整场计时调整](docs/POKER_HOST_START_TIMING.md)。
 
 房间时长与最终统计采用服务端权威数据；到时等待当前手结束，当前客户端展示最后一手十秒后进入结算，刷新直接结算。统一清单、复用设计和上线依赖见 [Java 后端能力交付文档](docs/POKER_BACKEND_CAPABILITIES.md)。
+
+行动按钮按“跟注/过牌、加注、弃牌”排列，弃牌为红色。本人可过牌时倒计时圈围绕过牌按钮，需要跟注时围绕弃牌按钮，使用服务端截止时间；客户端到零不自动发送动作。最新超时规则要求 Java 免费行动时 check、否则 fold，当前相邻 Java 仍一律 fold，所需改法和测试见 [超时动作设计](docs/POKER_ACTION_EFFECTS_TIMEOUT.md)。

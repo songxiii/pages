@@ -16,7 +16,7 @@
 | 游戏时长与到期收尾 | durationMinutes/PokerRoomTiming/requestEndOrFinalize | 已实现，复用 |
 | 首次开始后计时 | START_HAND 成功时持久化 startedAt/endsAt；开房时不计时 | 本轮要求，Java 待调整；前端已支持 WAITING |
 | 全场统计、完整账本最终报告 | accumulate/freezeSettlement、Repository 持久字段 | 已实现，复用 |
-| 超时一律弃牌、全下承诺 | timeout 一律 fold、allInCommitted | 已实现 |
+| 超时动作、全下承诺 | 当前 timeout 一律 fold、allInCommitted 已实现 | 2026-10-07 新要求需改为免费行动超时 check，否则 fold |
 | 主动关闭游戏 | CLOSE_GAME + HOST_CLOSED | 已实现，复用结束屏障 |
 | 本手中起身与中途落座 | STAND_UP/withdraw、SIT_DOWN/保留座已实现 | 已实现，复用 |
 | 新落座与补筹码自动参局 | updateNextHand 按有效在座资格恢复内部 ready | 已实现；恢复时还需移除额外十秒 |
@@ -190,7 +190,7 @@ Repository mapper/COLUMNS/INSERT/运行状态更新都要同步。统一提交 r
 
 ## 6. 历史剩余项已完成
 
-`PokerHand.timeout()` 已一律 fold；`HandPlayer.allInCommitted` 已在 pay 后设置、view 输出并持久化。无需重复实现。手牌隐藏、当前下注、folded/turnDeadline、准备/取消、带入、暂停、派奖和十秒自动下一手也继续复用。
+`PokerHand.timeout()` 当前一律 fold；2026-10-07 新要求改为可过牌时超时 check、需要跟注时 fold，后端仍需调整，详见 [超时动作设计](POKER_ACTION_EFFECTS_TIMEOUT.md)。`HandPlayer.allInCommitted` 已在 pay 后设置、view 输出并持久化，无需重复实现。手牌隐藏、当前下注、folded/turnDeadline、准备/取消、带入、暂停、派奖和十秒自动下一手也继续复用。
 
 主动关闭、本手起身和中途落座现已实现；本轮只需调整等人数恢复时的发牌时机，参见 [立即恢复设计](POKER_WAITING_RESUME.md)。
 
@@ -203,4 +203,4 @@ Repository mapper/COLUMNS/INSERT/运行状态更新都要同步。统一提交 r
 5. 已起身、离线、换座、退出活动者都有真实手数/带入/盈亏；所有玩家 netChips 之和在无扣费规则下为 0，总最终余额等于总带入，统计中没有遗漏的账本。
 6. 当前客户端看到最后一手+10秒，迟到/重复快照不重置倒计时；刷新/重新打开直接结算，不连 WS，不加成员或筹码。
 7. 结算正红+、负绿-、0 默认色，按净盈利排序，本人高亮；显示全部手数、总带入、牌局总金额、最大底池。
-8. 超时免费过牌场景改为弃牌；全下立即结算的赢家也能显示 ALL IN。旧房缺历史/旧服务缺字段不伪造结果。
+8. 超时可免费行动时过牌、需要跟注时弃牌；全下立即结算的赢家也能显示 ALL IN。旧房缺历史/旧服务缺字段不伪造结果。

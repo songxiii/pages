@@ -14,7 +14,7 @@
 | 中途落座，下局参局 | SIT_DOWN / 保留座与后续参局资格已实现 | 复用合法空座与下一手承诺 |
 | 开始后的准备状态 | 已按有效在座资格延续内部 ready，开始后拒绝 READY/UNREADY | 复用，无需再次准备 |
 | 时长与最终统计、10 秒最终结算 | 已有 RoomSettings.durationMinutes、PokerRoomTiming、requestEndOrFinalize、accumulate、freezeSettlement | 直接复用；本次无需重做，也无需新建结算接口 |
-| 超时弃牌、ALL IN | PokerHand.timeout 已一律 fold；HandPlayer.allInCommitted 已落地 | 已实现，无需重复开发 |
+| 超时动作、ALL IN | 当前 timeout 一律 fold；allInCommitted 已落地 | 2026-10-07 超时策略需按 [新设计](POKER_ACTION_EFFECTS_TIMEOUT.md) 改为免费过牌，否则弃牌；ALL IN 复用 |
 
 HTTP entry、rooms、原 WS 地址、requestId 去重、房间行锁、账本、加密手牌持久化及广播全部复用。暂停功能源码已支持；如果线上按钮仍灰，核对系统版本、房主身份、playState、timing 与 allowedCommands，不能仅凭前端截图认定服务端没有暂停实现。
 

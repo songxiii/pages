@@ -8,7 +8,7 @@
 
 **赢家派奖与自动续局已在最新 Java 源码实现，按 [赢家派奖与 10 秒自动续局设计](POKER_SETTLEMENT_AUTOPLAY.md) 部署验收**：result.payouts / settledAt、room.nextHand、每手延续参局资格及服务端到期发牌。首次开始后不用再准备/开始；该新文档的续局及暂停恢复规则优先于下面原版的逐手准备/立即恢复描述。
 
-最新剩余调整见 [行动特效与离线超时弃牌设计](POKER_ACTION_EFFECTS_TIMEOUT.md)：统一超时 fold，以及 allInCommitted 解决全下赢家立即结算时漏提示。无需新增接口。
+最新超时调整见 [行动特效与超时动作设计](POKER_ACTION_EFFECTS_TIMEOUT.md)：2026-10-07 要求免费行动超时 check，否则 fold，当前 Java 一律 fold 仍需修改；allInCommitted 已实现。无需新增接口。
 
 ## 1. 实现范围
 
@@ -23,7 +23,7 @@
 | 暂停游戏 | PAUSE_GAME、playState 和授权已加入 | 验收结算边界；新增自动续局排期取消规则 |
 | 继续游戏 | RESUME_GAME 和暂停授权已加入 | 按新设计改为恢复10秒排期，不要求再次准备 |
 | 赢家派奖明细和自动续局 | 已加入 payouts/settledAt/nextHand 和持久调度 | 部署验收金额、十秒排期、连续参局与暂停恢复 |
-| 离线超时一律弃牌 | 已有独立于连接的调度，但免费行动超时仍 check | 按新文档改为统一 fold |
+| 在线/离线超时动作 | 已有独立于连接的调度，当前一律 fold | 按新文档改为免费行动 check，否则 fold |
 | 全下立即结算的提示 | allIn 仅以最终 stack==0 判断 | 增加本手持久标志 allInCommitted |
 | 成员头像、累计带入、盈亏 | 已有 avatarUrl/totalBuyIn/netChips | 沿用；第 6 节说明结算盈亏可选调整 |
 | UTG、UTG+1、LJ、HJ、CO | 当前 PokerHand 已补齐 | 沿用 position，部署后核对庄位轮转；旧版本由前端兼容 |

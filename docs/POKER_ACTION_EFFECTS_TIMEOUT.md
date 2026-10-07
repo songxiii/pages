@@ -1,6 +1,6 @@
-# 手牌遮挡、行动特效与离线超时弃牌
+# 手牌遮挡、行动特效与超时动作
 
-2026-10-02 时长、最终结算及之前剩余项的统一交付清单见 [POKER_BACKEND_CAPABILITIES.md](POKER_BACKEND_CAPABILITIES.md)，本轮请优先使用该文档。
+2026-10-07 最新超时规则：可过牌时自动过牌，需要跟注时自动弃牌。本次已调整前端计时圈，Java 超时策略仍需调整。时长、最终结算等其他能力见 [POKER_BACKEND_CAPABILITIES.md](POKER_BACKEND_CAPABILITIES.md)。
 
 核对日期：2026-10-01。核对相邻 `daoleme` 当前 Java 源码；部署是否包含这些变更仍需真实房间联调。沿用活动 v1 WebSocket 与完整 SNAPSHOT，不新增 HTTP 接口或客户端超时命令。
 
@@ -16,25 +16,33 @@
 
 手牌向上覆盖头像，D/SB/BB 标记移入昵称信息框，避免遮挡牌面。两手之间仍由已实现的服务端 `room.nextHand` 排期自动继续。
 
-## 必须调整：超时一律弃牌，在线和离线相同
+## 必须调整：可过牌时超时过牌，否则弃牌
 
-现有 `PokerActivityTimeoutScheduler.scan()` 每 500ms 扫描持久化截止时间，调用 `PokerActivityService.timeout()`；该服务加房间行锁、读取手牌并持久化结果，不依赖 WebSocket 在线人数。因此断线、关闭浏览器、所有客户端退出后，调度仍能处理超时。
+核对日期：2026-10-07。当前相邻 `daoleme` 的 `PokerHand.timeout()` 实际调用 `act(p.userId, "fold", null, seconds, now, "TIMEOUT")`，有测试 `timeoutAlwaysFoldsIncludingFreeCheck` 固定了免费行动也弃牌的旧策略。因此自动过牌需要后端改，前端仅调整计时圈不能改变服务端结算。本仓库未修改或部署相邻 Java 后端。
 
-但 `THPoker/domain/PokerHand.java` 的 `timeout(int seconds, long now)` 当前调用：
-
-```java
-act(p.userId, currentBet > p.bet ? "fold" : "check", null, seconds, now);
-```
-
-这表示需要跟注才弃牌、免费行动则自动过牌，与最新要求不符。保留现有运行中/turn/截止条件，把该调用改为：
+保留现有 running/turn/deadline 条件，将该方法改为：
 
 ```java
-act(p.userId, "fold", null, seconds, now);
+public void timeout(int seconds, long now) {
+  if (running() && turn != null && deadline <= now) {
+    HandPlayer p = playerAt(turn);
+    act(p.userId, currentBet > p.bet ? "fold" : "check", null, seconds, now, "TIMEOUT");
+  }
+}
 ```
 
-继续复用 `act()` 的行动推进、单赢家结算、主池/边池分配及之后的 10 秒续局流程。现有 legal 已允许免费行动时主动 fold，无需新增 ACTION 类型。不要在浏览器到零时替玩家提交 ACTION，也不要在断线瞬间弃牌；到服务端行动截止时才弃牌。已全下且无须再行动的玩家不应成为 turn，不得因断线而弃掉已全下的手牌。
+判断使用**截止时当前权威下注状态**，与 `view()` 中 `canCheck = toCall == 0` 保持一致；不能信任浏览器发来的 canCheck。无需补筹码才允许 check；需要跟注则 fold，不自动跟注、不额外扣筹码。保留 source=TIMEOUT，历史中记真实 CHECK/FOLD 动作及超时来源。
 
-原有数据库行锁与事务继续串行化手动行动和超时，避免并发重复结算。请更新原先期望“超时过牌”的 Java 测试。
+现有 `PokerActivityTimeoutScheduler.scan()` 每 500ms 扫描持久化截止时间，调用持房间行锁的 `PokerActivityService.timeout()`，不依赖 WebSocket 在线人数。继续复用这些调度、事务、act() 的换轮、结算、续局及 SNAPSHOT 广播。在线、离线、关闭浏览器、全员离线均按同一规则处理；截止前断线不能提前行动。已全下且无需行动者不在 turn 中，不误过牌或弃牌。
+
+更新旧 Java 测试：需要跟注时超时只弃牌一次；免费行动时超时过牌、不标 folded、不扣筹码并正常换人或换街；未到截止不改变状态；重复扫描/手动动作并发不重复推进。服务重启、断线、历史 TIMEOUT 来源和相应 SNAPSHOT 一并验收。新策略可能让连续无人操作的免费轮次继续过牌，这是本次规则的预期结果。
+
+### 前端计时圈（已实现）
+
+- 本人当前可过牌时，左侧“过牌”按钮周边显示递减进度圈及剩余秒数，弃牌按钮隐藏计时圈。
+- 需要跟注时，左侧显示跟注金额，右侧红色“弃牌”按钮显示计时圈；不会暗示超时自动跟注。
+- 与头像共用 serverTime/turnDeadline/turnSeconds，快照刷新不重置时间。提交后、旁观、轮到他人和结算时隐藏；断线仍显示已知剩余时间。
+- 到零只禁用操作并等待服务端，不发送自动 CHECK/FOLD。这样避免多个页面重复动作和网络延迟竞态。前端计时圈已通过模拟服务验证，后端新策略仍需实现并上线联调。
 
 ## 补一个字段：全下后立即结算也能明确显示
 
@@ -58,7 +66,7 @@ act(p.userId, "fold", null, seconds, now);
 
 ## 验收
 
-1. 在线、离线、全员离线时，轮到玩家且 deadline 到期：有跟注额/没有跟注额均只弃牌一次。
+1. 在线、离线、全员离线时，轮到玩家且 deadline 到期：有跟注额则弃牌、没有跟注额则过牌，均只执行一次。
 2. 截止前断线不立即弃牌；重连看到同一个截止时间。已全下玩家无行动截止，不被误弃牌。
 3. 手动行动与超时并发，只推进一次；剩一人时底池正确结算，接入现有自动续局。
 4. 弃牌结束不公开对手底牌；摊牌时只公开未弃牌者。后端必须继续按 recipient 返回牌背，前端防护不替代服务端隐藏。
