@@ -1575,3 +1575,58 @@ test("音效关闭状态在页面初始化恢复；行动和下一手计时随�
   assert.equal(sound.nodes.length, 3);
   assert.equal(elements["next-hand-countdown"].textContent, "下一手 · 3s");
 });
+
+test("弃牌周边倒计时跟随服务器截止平滑缩减，刷新快照不重置，归零不发送弃牌", async () => {
+  let now = Date.now(); class ClockDate extends Date { static now() { return now; } }
+  const { elements, sockets, intervals } = mount([roomResponse()], "", { Date: ClockDate });
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const first = gameSnapshot();
+  first.room.settings.turnSeconds = 30;
+  first.serverTime = new Date(now + 60000).toISOString();
+  first.game.turnDeadline = new Date(now + 90000).toISOString();
+  sockets[0].receive({ type: "SNAPSHOT", payload: first });
+  assert.equal(elements["fold-countdown-ring"].hidden, false);
+  assert.equal(elements["fold-countdown-seconds"].textContent, "30s");
+  assert.equal(Number(elements["fold-action"].style.values["--fold-countdown-offset"]), 0);
+  now += 7500; for (const tick of intervals.values()) tick();
+  assert.equal(elements["fold-countdown-seconds"].textContent, "23s");
+  assert.equal(Number(elements["fold-action"].style.values["--fold-countdown-offset"]), 25);
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: 2, serverTime: new Date(now + 60000).toISOString() } });
+  assert.equal(Number(elements["fold-action"].style.values["--fold-countdown-offset"]), 25);
+  now += 12500; for (const tick of intervals.values()) tick();
+  assert.equal(elements["fold-countdown-seconds"].textContent, "10s");
+  assert.equal(elements["fold-action"].attributes["data-urgent"], "true");
+  now += 10000; for (const tick of intervals.values()) tick();
+  assert.equal(elements["fold-countdown-seconds"].textContent, "0s");
+  assert.equal(Number(elements["fold-action"].style.values["--fold-countdown-offset"]), 100);
+  assert.equal(elements["fold-action"].disabled, true);
+  assert.equal(sockets[0].sent.filter(frame => frame.type === "ACTION").length, 0);
+});
+
+test("弃牌计时圈只显示本人当前行动，提交、换人、旁观、缺截止及结算及时清除", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const first = gameSnapshot();
+  first.game.turnDeadline = new Date(Date.now() + 20000).toISOString();
+  sockets[0].receive({ type: "SNAPSHOT", payload: first });
+  assert.equal(elements["fold-countdown-ring"].hidden, false);
+  sockets[0].onclose({ code: 1000, reason: "" });
+  assert.equal(elements["fold-action"].disabled, true);
+  assert.equal(elements["fold-countdown-ring"].hidden, false);
+  await elements["connect-ws"].listeners.click(); authenticate(sockets[1]);
+  sockets[1].receive({ type: "SNAPSHOT", payload: first });
+  elements["fold-action"].listeners.click();
+  assert.equal(elements["fold-countdown-ring"].hidden, true);
+  assert.equal(elements["fold-countdown-seconds"].hidden, true);
+  for (const [index, overrides] of [
+    { game: { ...first.game, turn: 1 } },
+    { self: { ...first.self, seatIndex: null, roomState: "WATCHING" } },
+    { game: { ...first.game, turnDeadline: null } },
+    { game: { ...first.game, phase: "complete", turn: null, result: {} } },
+  ].entries()) {
+    sockets[1].receive({ type: "SNAPSHOT", payload: { ...first, ...overrides, revision: index + 2 } });
+    assert.equal(elements["fold-countdown-ring"].hidden, true);
+    assert.equal(elements["fold-countdown-seconds"].textContent, "");
+    assert.equal(elements["fold-action"].attributes["aria-label"], "弃牌");
+  }
+});

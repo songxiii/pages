@@ -382,6 +382,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
   function updateActions() {
     const enabled = Boolean(canAct()), legal = game?.legal || {};
     $("fold-action").disabled = !enabled || legal.canFold === false;
+    updateFoldClock();
     $("call-action").disabled = !enabled || !(legal.canCheck || legal.canCall);
     $("call-action").replaceChildren(node("span", "", legal.canCheck ? "过牌" : "跟注"));
     if (!legal.canCheck && legal.canCall) $("call-action").append(node("b", "", formatChips(legal.toCall)));
@@ -466,14 +467,41 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     onCommand(type, commandPayload);
   }
 
+  function updateFoldClock() {
+    const seat = ownSeat(view);
+    const participant = handParticipant(view, { ...view.self, seatIndex: seat });
+    const end = Date.parse(game?.turnDeadline || "");
+    const visible = Number.isFinite(end) && seat !== null && seat === game?.turn && game.phase !== "complete"
+      && participant && !participant.folded && !pending && !roomEnded(view)
+      && !roomControls(view, Date.now() + serverOffset).paused;
+    $("fold-countdown-ring").hidden = !visible;
+    $("fold-countdown-seconds").hidden = !visible;
+    $("fold-action").setAttribute("data-countdown", String(Boolean(visible)));
+    if (!visible) {
+      $("fold-action").style.setProperty("--fold-countdown-offset", "100");
+      $("fold-countdown-seconds").textContent = "";
+      $("fold-action").setAttribute("aria-label", "弃牌");
+      $("fold-action").setAttribute("data-urgent", "false");
+      return;
+    }
+    const remaining = Math.max(0, end - Date.now() - serverOffset);
+    const seconds = Math.ceil(remaining / 1000);
+    const duration = Number(view.room?.settings?.turnSeconds);
+    const progress = Math.min(100, remaining / ((Number.isFinite(duration) && duration > 0 ? duration : 30) * 1000) * 100);
+    $("fold-action").style.setProperty("--fold-countdown-offset", String(100 - progress));
+    $("fold-action").setAttribute("data-urgent", String(seconds <= 10));
+    $("fold-action").setAttribute("aria-label", "弃牌，剩余 " + seconds + " 秒");
+    $("fold-countdown-seconds").textContent = seconds + "s";
+  }
   function updateClock() {
+    updateFoldClock();
     if (!currentTimer || !Number.isFinite(deadline)) return;
     const seconds = Math.max(0, Math.ceil((deadline - Date.now() - serverOffset) / 1000));
     currentTimer.style.setProperty("--time", Math.min(100, seconds / (view.room?.settings?.turnSeconds || 30) * 100) + "%");
     currentSeconds.textContent = seconds + "s";
     currentSeat.setAttribute("data-urgent", String(seconds <= 10));
     onCountdown("turn", [game?.handId ?? game?.handNumber, game?.turn, game?.turnDeadline].join(":"), seconds, connected && canAct());
-    if (!seconds) { connected = false; updateActions(); $("table-notice").textContent = "行动时间已到，等待服务端更新…"; }
+    if (!seconds) { clearInterval(timer); timer = null; connected = false; updateActions(); $("table-notice").textContent = "行动时间已到，等待服务端更新…"; }
   }
   function updateNextHandClock() {
     const state = nextHandState(view, Date.now() + serverOffset, fallbackDeadline);
@@ -645,7 +673,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     deadline = Date.parse(game?.turnDeadline || "");
     if (currentSeconds) currentSeconds.hidden = !Number.isFinite(deadline);
     clearInterval(timer); updateClock();
-    if (currentTimer && Number.isFinite(deadline)) timer = setInterval(updateClock, 1000);
+    if (currentTimer && Number.isFinite(deadline) && deadline > Date.now() + serverOffset) timer = setInterval(updateClock, 100);
     if (newHand && game?.phase !== "complete") animateDeal(layout.filter((p) => players.find((player) => player.seatIndex === p.seatIndex && player.hole?.length)));
     lastHand = handKey; lastBoard = [...cards]; updateActions(); resize();
     clearInterval(nextHandTimer); updateNextHandClock();
@@ -738,6 +766,6 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
       holeCardsHidden = false; selfCards = []; closeProfile();
       $("deal-layer").replaceChildren(); $("payout-layer").replaceChildren(); $("next-hand-countdown").hidden = true;
       lastLayoutKey = null; lastHand = null; lastBoard = []; activeHandSeen = null; lastPaidHand = null; fallbackHand = null; fallbackDeadline = null;
-      connected = false; pending = false; updateActions(); },
+      game = null; connected = false; pending = false; updateActions(); },
   };
 }
