@@ -799,13 +799,12 @@ button.seat-avatar:focus-visible { outline:2px solid var(--gold); outline-offset
 .table-action.fold-action { position:relative; color:#fff0f1; border-color:#d45160; background:linear-gradient(#ac3547,#842235 60%,#671929); }
 .table-action.fold-action:hover:not(:disabled) { background:linear-gradient(#bf4053,#982a3f 60%,#7b2032); }
 .action-label,.action-countdown-seconds { position:relative; z-index:1; }
-.action-countdown-ring { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; overflow:visible; }
-.action-countdown-ring svg { display:block; width:100%; height:100%; overflow:visible; }
-.action-countdown-ring rect,.action-countdown-ring path { fill:none; stroke-width:2.5px; vector-effect:non-scaling-stroke; }
-.action-countdown-track { stroke:#ffe2e32b; }
-.action-countdown-progress { stroke:#ffe6a3; stroke-dasharray:100; stroke-dashoffset:calc(-1 * var(--action-countdown-offset,100)); stroke-linecap:round; }
+.action-countdown-ring { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; border-radius:inherit; box-shadow:inset 0 0 0 2.5px #ffe2e32b; }
+/* A full border at 0 elapsed; the transparent sector grows clockwise from 12 o'clock.
+   Using the actual button box avoids SVG dash-length distortion during resizing. */
+.action-countdown-progress { position:absolute; inset:0; padding:2.5px; border-radius:inherit; --elapsed-angle:calc(var(--action-countdown-offset,100) * 3.6deg); background:conic-gradient(from 0deg,transparent 0deg var(--elapsed-angle),var(--action-countdown-color,#ffe6a3) var(--elapsed-angle) 360deg); -webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0); mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0); -webkit-mask-composite:xor; mask-composite:exclude; }
 .action-countdown-seconds { display:block; margin-top:2px; font-size:10px; font-variant-numeric:tabular-nums; line-height:1.1; color:#ffe6a3; }
-.table-action[data-urgent="true"] .action-countdown-progress { stroke:#fff; }
+.table-action[data-urgent="true"] .action-countdown-progress { --action-countdown-color:#fff; }
 .table-action[data-urgent="true"] .action-countdown-seconds { color:#fff; font-weight:700; }
 .table-action[data-countdown="true"]:disabled { opacity:.65; }
 .gold-action {
