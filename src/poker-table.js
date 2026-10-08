@@ -758,7 +758,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
       const strength = .7 + (i * 7 % 11) * .03;
       piece.setAttribute("data-source-seat", String(ownAward.seatIndex));
       piece.style.setProperty("--burst-dx", Math.cos(angle) * stage.width * .46 * strength + "px");
-      piece.style.setProperty("--burst-dy", Math.sin(angle) * Math.min(600, stage.height * 1.3) * strength + "px");
+      piece.style.setProperty("--burst-dy", Math.sin(angle) * Math.min(800, stage.height * 1.6) * strength + "px");
       piece.style.setProperty("--burst-gravity", Math.min(600, stage.height * .95) + "px");
       piece.style.setProperty("--confetti-delay", Math.floor(i / 18) * 240 + i % 3 * 20 + "ms");
       piece.style.setProperty("--burst-spin", (i % 2 ? 1 : -1) * (360 + i % 4 * 180) + "deg");
@@ -766,7 +766,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
       confetti.append(piece);
     }
     $("table-stage").setAttribute("data-celebrating", "true");
-    victoryCleanupTimer = setTimeout(clearVictory, 3600);
+    victoryCleanupTimer = setTimeout(clearVictory, 8000);
   }
   function animatePayout(awards) {
     clearTimeout(payoutCleanupTimer);

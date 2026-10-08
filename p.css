@@ -1265,7 +1265,7 @@ body.room-mode { height:100dvh; min-height:0; }
 .victory-winner { display:flex; align-items:center; gap:8px; margin:5px 0 0; font-size:13px; font-weight:700; line-height:1.5; }
 .victory-winner-name { flex:1; min-width:0; text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .victory-winner-detail { flex-shrink:0; color:#ffe6a3; white-space:nowrap; }
-.victory-confetti { position:absolute; inset:0; }
+.victory-confetti { position:absolute; inset:0; z-index:1; }
 .victory-confetti:not(:empty)::before { content:""; position:absolute; left:var(--burst-origin-x); top:var(--burst-origin-y); width:28px; height:28px; border:2px solid #fff1c8; border-radius:50%; box-shadow:0 0 24px #ffd884; animation:victory-burst-flash .65s ease-out both; }
 .victory-confetti-piece { position:absolute; top:var(--burst-origin-y); left:var(--burst-origin-x); width:7px; height:12px; border-radius:2px; background:var(--confetti-color); animation:victory-confetti-burst 2.2s linear var(--confetti-delay) both; }
 .victory-confetti-piece:nth-child(3n) { width:6px; height:6px; border-radius:50%; box-shadow:0 0 6px var(--confetti-color); }
