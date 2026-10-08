@@ -1,8 +1,8 @@
-import { createPokerTable, formatChips, safeAvatar, memberAmounts, memberStateText } from "./poker-table.js?v=20261008-avatar-fireworks";
+import { createPokerTable, formatChips, safeAvatar, memberAmounts, memberStateText } from "./poker-table.js?v=20261008-card-palette";
 import { POKER_API_BASE_URL } from "./poker-config.js";
 import { ticketFromLocation, ticketFragmentUrl, validateSettings, redactCredentials, normalizeWebSocketUrl } from "./poker-entry.js";
 import { roomEnded, sessionClock, settlementShowAt, settlementRows, settlementStats } from "./poker-session.js?v=20261008-round-wording";
-import { createPokerHistory } from "./poker-history.js?v=20261008-round-wording";
+import { createPokerHistory } from "./poker-history.js?v=20261008-card-palette";
 import { createPokerSound } from "./poker-sound.js?v=20261004-host-controls";
 
 const $ = (id) => document.getElementById(id);

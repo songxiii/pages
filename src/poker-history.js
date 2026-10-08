@@ -26,7 +26,7 @@ export function createPokerHistory({ document, request, getRoom, formatChips, sa
     const suit = value.slice(-1), rank = value.slice(0, -1).replace("T", "10");
     const symbols = { S: "♠", H: "♥", D: "♦", C: "♣" };
     card.setAttribute("data-suit", suit); card.setAttribute("aria-label", rank + symbols[suit]);
-    card.append(node("b", "", rank), node("span", "", symbols[suit]));
+    card.append(node("b", "", rank), node("span", "", symbols[suit] + "\uFE0E"));
     return card;
   }
   function cards(values) {

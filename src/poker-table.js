@@ -299,7 +299,8 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     if (match) {
       const rank = match[1].toUpperCase() === "T" ? "10" : match[1].toUpperCase();
       const suit = { s: "♠", h: "♥", d: "♦", c: "♣" }[match[2].toLowerCase()];
-      el.append(node("span", "rank", rank), node("span", "suit", suit));
+      el.append(node("span", "rank", rank), node("span", "suit", suit + "\uFE0E"));
+      el.setAttribute("data-suit", match[2].toUpperCase());
       el.setAttribute("aria-label", rank + suit);
     } else el.setAttribute("aria-label", "隐藏底牌");
     return el;
