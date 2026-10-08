@@ -15,10 +15,10 @@ test("未开始的房间等待服务端首次开局时间，不从进入时间�
   // An older service's real deadline is still authoritative until the server is upgraded.
   assert.equal(sessionClock({ room: { timing: { status: "OPEN", endsAt: new Date(now + 60000).toISOString() } } }, now).seconds, 60);
 });
-test("房间计时按绝对截止，暂停不冻结，到零不在前端结束当前手", () => {
+test("房间计时按绝对截止，暂停不冻结，到零不在前端结束当前局", () => {
   const view = { room: { playState: "PAUSED", timing: { endsAt: new Date(now + 3661000).toISOString() } }, game: { phase: "flop" } };
   assert.equal(sessionClock(view, now).text, "剩余 01:01:01");
-  assert.equal(sessionClock(view, now + 3661000).text, "时间已到 · 本手结束后结算");
+  assert.equal(sessionClock(view, now + 3661000).text, "时间已到 · 本局结束后结算");
   assert.equal(roomEnded(view), false);
   assert.equal(sessionClock({ room: {} }, now).visible, false);
   assert.equal(sessionClock({ room: { timing: { status: "ENDING" } } }, now).text, "时间已到 · 等待结算");

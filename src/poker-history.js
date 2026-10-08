@@ -44,11 +44,12 @@ export function createPokerHistory({ document, request, getRoom, formatChips, sa
     el("history-hand").hidden = !hand;
     el("history-position").textContent = data.position + " / " + data.totalHands;
     el("history-coverage").hidden = data.coverage?.status !== "PARTIAL";
-    el("history-coverage").textContent = data.coverage?.status === "PARTIAL" ? data.coverage.message || "早期牌局未保存，仅展示已有历史。" : "";
+    el("history-coverage").textContent = data.coverage?.status === "PARTIAL"
+      ? (data.coverage.message || "早期牌局未保存，仅展示已有历史。").replace(/(第\s*\d+\s*)手/g, "$1局") : "";
     el("history-players").replaceChildren();
     if (!hand) { el("history-status").textContent = "暂无已结算的历史牌局。"; return; }
     el("history-status").textContent = "";
-    el("history-hand-number").textContent = "第 " + hand.handNumber + " 手";
+    el("history-hand-number").textContent = "第 " + hand.handNumber + " 局";
     const time = Date.parse(hand.settledAt || hand.startedAt || "");
     el("history-time").textContent = Number.isFinite(time) ? new Date(time).toLocaleString("zh-CN", { hour12: false }) : "时间未提供";
     el("history-time").setAttribute("datetime", Number.isFinite(time) ? new Date(time).toISOString() : "");

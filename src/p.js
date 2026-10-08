@@ -1,8 +1,8 @@
-import { createPokerTable, formatChips, safeAvatar, memberAmounts, memberStateText } from "./poker-table.js?v=20261008-winner-avatar";
+import { createPokerTable, formatChips, safeAvatar, memberAmounts, memberStateText } from "./poker-table.js?v=20261008-round-wording";
 import { POKER_API_BASE_URL } from "./poker-config.js";
 import { ticketFromLocation, ticketFragmentUrl, validateSettings, redactCredentials, normalizeWebSocketUrl } from "./poker-entry.js";
-import { roomEnded, sessionClock, settlementShowAt, settlementRows, settlementStats } from "./poker-session.js?v=20261004-host-start-timing";
-import { createPokerHistory } from "./poker-history.js?v=20261004-history-no-id";
+import { roomEnded, sessionClock, settlementShowAt, settlementRows, settlementStats } from "./poker-session.js?v=20261008-round-wording";
+import { createPokerHistory } from "./poker-history.js?v=20261008-round-wording";
 import { createPokerSound } from "./poker-sound.js?v=20261004-host-controls";
 
 const $ = (id) => document.getElementById(id);
@@ -127,7 +127,7 @@ function finishSession(data, live = false) {
   // Opening or refreshing an ended room always goes straight to the final report.
   if (!live || view.game && view.game.phase !== "complete") { display(); return; }
   showPanel("room-panel"); renderRoom(); clearInterval(roomClockTimer); roomClockTimer = null;
-  setWsStatus("已结束"); table.setConnected(false, view.game ? "本场已结束，正在展示最后一手结果" : "本场已结束，正在进入结算");
+  setWsStatus("已结束"); table.setConnected(false, view.game ? "本场已结束，正在展示最后一局结果" : "本场已结束，正在进入结算");
   const deadline = settlementShowAt(view, Date.now() + roomClockOffset);
   const tick = () => {
     const seconds = Math.max(0, Math.ceil((deadline - Date.now() - roomClockOffset) / 1000));
@@ -146,9 +146,9 @@ function summaryNode(tag, className, value) {
 }
 function renderSettlement() {
   const report = view?.settlement?.status === "FINAL" ? view.settlement : null;
-  text("settlement-title", view?.activity?.title || view?.room?.name || "牌局结算");
+  text("settlement-title", view?.activity?.title || view?.room?.name || "本场结算");
   const endedAt = Date.parse(report?.endedAt || view?.room?.timing?.endedAt || "");
-  text("settlement-ended-at", Number.isFinite(endedAt) ? "结束于 " + new Date(endedAt).toLocaleString("zh-CN", { hour12: false }) : "本场牌局已结束");
+  text("settlement-ended-at", Number.isFinite(endedAt) ? "结束于 " + new Date(endedAt).toLocaleString("zh-CN", { hour12: false }) : "本场已结束");
   const stats = settlementStats(report);
   for (const [id, key] of [["settlement-total-hands", "totalHands"], ["settlement-total-buy-in", "totalBuyIn"], ["settlement-total-pot", "totalPot"], ["settlement-max-pot", "maxPot"]]) {
     text(id, stats[key] === null ? "—" : formatChips(stats[key]));
@@ -173,7 +173,7 @@ function renderSettlement() {
     const profile = summaryNode("div", "settlement-profile"), name = summaryNode("strong", "settlement-name", player.nickname || "玩家");
     name.setAttribute("title", player.nickname || "玩家");
     const details = summaryNode("div", "settlement-player-meta");
-    details.append(summaryNode("span", "", "ID: " + player.userId), summaryNode("span", "settlement-hands", "手数 " + (player.handsPlayed === null ? "—" : formatChips(player.handsPlayed))));
+    details.append(summaryNode("span", "", "ID: " + player.userId), summaryNode("span", "settlement-hands", "参与局数 " + (player.handsPlayed === null ? "—" : formatChips(player.handsPlayed))));
     profile.append(name, details);
     const balance = summaryNode("div", "settlement-balance");
     balance.append(summaryNode("strong", "settlement-profit" + (player.netChips > 0 ? " profit-positive" : player.netChips < 0 ? " profit-negative" : ""), player.netChips === null ? "—" : player.netChips > 0 ? "+" + formatChips(player.netChips) : formatChips(player.netChips)),
@@ -407,7 +407,7 @@ function renderRoom() {
   const members = Array.isArray(view.roomMembers) ? view.roomMembers : [];
   const own = members.find((member) => String(member.id || member.userId) === String(self.id || self.userId));
   text("room-title", view.activity?.title || room.name || "活动房间");
-  text("room-status", room.timing?.status === "ENDING" ? "本手结束后结算" : room.playState === "PAUSED" ? "等待牌局继续" : room.playState === "RUNNING" && room.status === "WAITING" ? "等待下一手" : room.status === "WAITING" ? "等待开局" : room.status === "PLAYING" ? "牌局进行中" : room.status || "房间");
+  text("room-status", room.timing?.status === "ENDING" ? "本局结束后结算" : room.playState === "PAUSED" ? "等待牌局继续" : room.playState === "RUNNING" && room.status === "WAITING" ? "等待下一局" : room.status === "WAITING" ? "等待开局" : room.status === "PLAYING" ? "牌局进行中" : room.status || "房间");
   text("room-member-count", number(counts.roomMemberCount));
   text("seated-count", number(counts.seatedCount));
   text("self-state", memberStateText(view, { ...self, ...own }));
@@ -656,7 +656,7 @@ $("close-error").addEventListener("click", () => $("error-dialog").close());
 $("show-error").addEventListener("click", () => { if (!$("error-dialog").open) $("error-dialog").showModal(); });
 let resolveStanding = null;
 function confirmStanding({ abandoningHand = false } = {}) {
-  text("stand-dialog-description", abandoningHand ? "起身将立即放弃本手，已下注筹码仍留在底池。离开座位后，你将转为旁观。" : "离开当前座位后，你将以旁观身份观看牌局。");
+  text("stand-dialog-description", abandoningHand ? "起身将立即放弃本局，已下注筹码仍留在底池。离开座位后，你将转为旁观。" : "离开当前座位后，你将以旁观身份观看牌局。");
   return new Promise((resolve) => {
     resolveStanding = resolve;
     $("stand-dialog").returnValue = "";

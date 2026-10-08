@@ -31,16 +31,16 @@ test("首次开始后取消准备展示和权限，连续游戏等待、暂停�
     const view = { room: { playState }, self: { ...member, allowedCommands: ["READY", "UNREADY", "START_HAND"] }, roomMembers: [member] };
     assert.equal(playerReady(view, member), false);
     assert.equal(roomControls(view).canReady, false); assert.equal(roomControls(view).canUnready, false);
-    assert.equal(memberStateText(view, member), "等待下一手");
+    assert.equal(memberStateText(view, member), "等待下一局");
   }
   assert.equal(playerReady({ game: { phase: "complete" } }, member), false);
 });
 
-test("下局加入按用户身份与当前参局名单判断，不能因同座位继承上一人的牌", () => {
+test("下一局加入按用户身份与当前参局名单判断，不能因同座位继承上一人的牌", () => {
   const member = { userId: "new", seatIndex: 1 };
   const view = { game: { phase: "flop", players: [{ userId: "old", seatIndex: 1 }] } };
   assert.equal(waitingNextHand(view, member), true);
-  assert.equal(memberStateText(view, member), "下局加入");
+  assert.equal(memberStateText(view, member), "下一局加入");
   assert.equal(waitingNextHand(view, { ...member, seatIndex: null }), false);
   const joined = { ...view, game: { phase: "preflop", players: [member] } };
   assert.equal(waitingNextHand(joined, { ...member, participation: "WAITING_NEXT_HAND" }), false);
@@ -176,11 +176,11 @@ test("赢家复用现有座号，单赢家取底池；多赢家不猜分配额�
   assert.deepEqual(handAwards({ ...game, phase: "river" }), []);
 });
 
-test("下一手时间使用服务端截止；暂停、人数不足和过期时间有明确状态，不伪造自动发牌", () => {
+test("下一局时间使用服务端截止；暂停、人数不足和过期时间有明确状态，不伪造自动发牌", () => {
   const now = Date.parse("2026-10-01T01:00:00Z");
   const game = { handId: "H1", phase: "complete" };
   const room = { playState: "RUNNING", nextHand: { status: "COUNTDOWN", sourceHandId: "H1", startsAt: "2026-10-01T01:00:10Z" } };
-  assert.equal(nextHandState({ game, room }, now).text, "下一手 · 10s");
+  assert.equal(nextHandState({ game, room }, now).text, "下一局 · 10s");
   assert.equal(nextHandState({ game, room }, now + 8000).seconds, 2);
   assert.equal(nextHandState({ game, room }, now + 10000).text, "正在等待服务端发牌…");
   assert.equal(nextHandState({ game, room: { ...room, playState: "PAUSED" } }, now).text, "等待服务端继续牌局");
@@ -189,7 +189,7 @@ test("下一手时间使用服务端截止；暂停、人数不足和过期时�
   assert.equal(nextHandState({ game: { ...game, handId: "H2" }, room }, now).visible, false);
   assert.equal(nextHandState({ game, room: { status: "CLOSED" } }, now).visible, false);
   assert.equal(nextHandState({ game }, now, now + 10000).text, "结算展示 · 10s");
-  assert.equal(nextHandState({ game }, now + 10000, now + 10000).text, "等待服务端开启下一手");
+  assert.equal(nextHandState({ game }, now + 10000, now + 10000).text, "等待服务端开启下一局");
 });
 
 

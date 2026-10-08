@@ -1,5 +1,5 @@
 // Activity table: the server owns cards, money and turns; the browser limits NLHE betting.
-import { roomEnding, roomEnded } from "./poker-session.js?v=20261004-host-start-timing";
+import { roomEnding, roomEnded } from "./poker-session.js?v=20261008-round-wording";
 import { createPokerBettingRules, validPokerRaise } from "./poker-betting.js?v=20261003-tda";
 export const PHASE_NAMES = { preflop: "翻牌前", flop: "翻牌", turn: "转牌", river: "河牌", complete: "本局结束" };
 // Clockwise visual order starts with the receiving player's seat at bottom center.
@@ -67,11 +67,11 @@ export function eligiblePlayerCount(view) {
 }
 export function memberStateText(view, member) {
   if (needsChips(view, member)) return "等待补筹码";
-  if (waitingNextHand(view, member)) return "下局加入";
+  if (waitingNextHand(view, member)) return "下一局加入";
   if (seatIndex(member) === null) return "旁观中";
   if (roomStarted(view)) {
     const player = handParticipant(view, member);
-    return view.game?.phase !== "complete" && player ? (player.folded ? "已弃牌" : "牌局中") : "等待下一手";
+    return view.game?.phase !== "complete" && player ? (player.folded ? "已弃牌" : "牌局中") : "等待下一局";
   }
   return playerReady(view, member) ? "已准备" : "已入座";
 }
@@ -236,13 +236,13 @@ export function nextHandState(view, now, fallbackDeadline = null) {
     const deadline = Date.parse(view.room.nextHand.startsAt);
     if (Number.isFinite(deadline)) {
       const seconds = Math.max(0, Math.ceil((deadline - now) / 1000));
-      return { visible: true, seconds, text: seconds ? "下一手 · " + seconds + "s" : "正在等待服务端发牌…" };
+      return { visible: true, seconds, text: seconds ? "下一局 · " + seconds + "s" : "正在等待服务端发牌…" };
     }
-    return { visible: true, text: "正在同步下一手时间…" };
+    return { visible: true, text: "正在同步下一局时间…" };
   }
   if (view.game?.phase !== "complete" || fallbackDeadline === null) return { visible: false };
   const seconds = Math.max(0, Math.ceil((fallbackDeadline - now) / 1000));
-  return { visible: true, seconds, text: seconds ? "结算展示 · " + seconds + "s" : "等待服务端开启下一手" };
+  return { visible: true, seconds, text: seconds ? "结算展示 · " + seconds + "s" : "等待服务端开启下一局" };
 }
 export function safeAvatar(url) {
   try { const parsed = new URL(url); return ["https:", "http:"].includes(parsed.protocol) ? parsed.href : null; }
@@ -337,7 +337,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     }
     $("player-profile-name").textContent = name;
     $("player-profile-hint").hidden = !mine || !selfCards.length;
-    $("player-profile-hint").textContent = holeCardsHidden ? "手牌已隐藏 · 再点头像翻开" : "手牌已翻开 · 再点头像隐藏";
+    $("player-profile-hint").textContent = holeCardsHidden ? "底牌已隐藏 · 再点头像翻开" : "底牌已翻开 · 再点头像隐藏";
     $("player-profile").style.setProperty("--profile-x", place.x + "%");
     $("player-profile").style.setProperty("--profile-y", (place.y > 50 ? place.y - 27 : place.y + 10) + "%");
     $("player-profile").hidden = false;
@@ -425,7 +425,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     $("stand-up").hidden = !controls.seated;
     $("stand-up").disabled = !enabledControl || !controls.canStand;
     $("stand-detail").hidden = !controls.seated || !controls.inHand;
-    $("stand-detail").textContent = controls.canStand ? "起身将立即放弃本手，已下注筹码留在底池，随后转为旁观。" : "服务端尚未授权本手起身，需要支持起身时立即弃牌。";
+    $("stand-detail").textContent = controls.canStand ? "起身将立即放弃本局，已下注筹码留在底池，随后转为旁观。" : "服务端尚未授权本局起身，需要支持起身时立即弃牌。";
     $("ready-player").hidden = !controls.canReady;
     $("ready-player").disabled = !enabledControl || !controls.canReady;
     $("unready-player").hidden = !controls.ready;
@@ -453,8 +453,8 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
       : controls.started && view.room?.nextHand?.status === "WAITING_PLAYERS" ? (eligibleCount !== null && eligibleCount >= 2
         ? "人数已满足，等待服务端发牌，无需重新开始。" : "有可用筹码的在座玩家不足 2 人时等待；人数恢复后由服务端自动开局，无需准备或再次开始。")
       : controls.seatedCount < 2 ? "至少需要 2 人落座，目前 " + controls.seatedCount + " 人。"
-      : controls.inHand ? "牌局进行中，每手结束后自动继续。"
-      : controls.started ? "游戏已开始，每手结束后自动继续，无需重新准备或开始。" : controls.canStart ? "已有 " + controls.seatedCount + " 人落座，可以开始游戏。" : "已落座 " + controls.seatedCount + " 人，已准备 " + controls.readyCount + " 人，等待开局条件满足。";
+      : controls.inHand ? "牌局进行中，每局结束后自动继续。"
+      : controls.started ? "游戏已开始，每局结束后自动继续，无需重新准备或开始。" : controls.canStart ? "已有 " + controls.seatedCount + " 人落座，可以开始游戏。" : "已落座 " + controls.seatedCount + " 人，已准备 " + controls.readyCount + " 人，等待开局条件满足。";
   }
   function command(type, payload = {}) {
     if (pending) { reportError("正在处理上一项操作，请稍候…"); return; }
@@ -605,7 +605,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
       if (avatarUrl) { const img = node("img", ""); img.src = avatarUrl; img.alt = ""; img.referrerPolicy = "no-referrer"; img.addEventListener("error", () => img.remove()); avatar.append(img); }
       if (person) {
         const key = String(identity(person) ?? "seat:" + place.seatIndex);
-        avatar.type = "button"; avatar.setAttribute("aria-label", "查看" + name + "的头像和昵称" + (mine && player?.hole?.length ? "，切换手牌显示" : ""));
+        avatar.type = "button"; avatar.setAttribute("aria-label", "查看" + name + "的头像和昵称" + (mine && player?.hole?.length ? "，切换底牌显示" : ""));
         avatar.setAttribute("aria-controls", "player-profile"); avatar.setAttribute("aria-expanded", "false");
         profiles.set(key, { avatar, name, avatarUrl, mine, place });
         avatar.addEventListener("click", () => {
@@ -640,7 +640,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
         badge.setAttribute("title", name + " " + badge.textContent); el.append(badge);
       }
       if (person && playerReady(view, member || person)) el.append(node("span", "seat-readiness", "已准备"));
-      if (person && !chipWait && waitingNextHand(view, member || person)) el.append(node("span", "seat-next-hand", "下局加入"));
+      if (person && !chipWait && waitingNextHand(view, member || person)) el.append(node("span", "seat-next-hand", "下一局加入"));
       if (person && player?.hole?.length && (game.phase !== "complete" || sameParticipant)) {
         const hole = node("div", "hole-cards");
         hole.setAttribute("data-compact", String(!mine && game.phase !== "complete"));
@@ -671,7 +671,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     $("table-pot").textContent = formatChips(game?.pot ?? 0);
     renderPotChips(game?.pot ?? 0);
     $("pot-label").textContent = awards.length ? "已分配底池" : "底池";
-    $("table-phase").textContent = game ? "第 " + (game.handNumber ?? "—") + " 手 · " + (PHASE_NAMES[game.phase] || "牌局进行中") : "等待开局";
+    $("table-phase").textContent = game ? "第 " + (game.handNumber ?? "—") + " 局 · " + (PHASE_NAMES[game.phase] || "牌局进行中") : "等待开局";
     const winnerText = (award) => award.nickname + (award.amount === null ? "" : " +" + formatChips(award.amount)) + " 获胜 · " + winningHandName(game, award.seatIndex);
     $("table-result").textContent = awards.length ? awards.map(winnerText).join("；") : game?.result?.message || "";
     $("table-result").setAttribute("title", $("table-result").textContent);
@@ -689,8 +689,8 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
         ? (selfSeat !== null && needsChips(view, (members.find(member => Number(seatIndex(member)) === selfSeat && seatIndex(member) !== null) || { ...view.self, seatIndex: selfSeat }))
           ? "筹码为零，请在菜单补充筹码；到账后自动参局"
           : eligibleCount !== null && eligibleCount >= 2 ? "人数已满足，等待服务端发牌…" : "等待可参局玩家，补筹码或新玩家落座后由服务端自动开局")
-      : selfSeat === null ? "你正在旁观本场牌局" : waitingNextHand(view, { ...view.self, seatIndex: selfSeat }) ? "已落座 · 下局加入，本手结束后自动参局"
-      : canAct() ? "轮到你行动" : game.phase === "complete" ? "本局结束，等待下一手" : "等待其他玩家行动";
+      : selfSeat === null ? "你正在旁观本场牌局" : waitingNextHand(view, { ...view.self, seatIndex: selfSeat }) ? "已落座 · 下一局加入，本局结束后自动参局"
+      : canAct() ? "轮到你行动" : game.phase === "complete" ? "本局结束，等待下一局" : "等待其他玩家行动";
     deadline = Date.parse(game?.turnDeadline || "");
     if (currentSeconds) currentSeconds.hidden = !Number.isFinite(deadline);
     clearInterval(timer); updateClock();
@@ -738,7 +738,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
   }
   function animateVictory(awards) {
     clearVictory();
-    $("victory-title").textContent = awards.length > 1 ? "共同获胜" : "本手获胜";
+    $("victory-title").textContent = awards.length > 1 ? "共同获胜" : "本局获胜";
     for (let i = 0; i < (awards.some(isOwnAward) ? 36 : 0); i++) {
       const piece = node("span", "victory-confetti-piece");
       piece.style.setProperty("--confetti-x", (i * 37 % 100) + "%");

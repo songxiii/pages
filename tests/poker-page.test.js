@@ -303,7 +303,7 @@ function gameSnapshot(overrides = {}) {
 function authenticate(socket) { socket.open(); socket.receive({ type: "AUTH_OK" }); }
 function descendants(root) { return [root, ...root.children.flatMap(descendants)]; }
 
-test("点击头像展示昵称及安全头像；本人手牌反复翻转、同步保留隐藏、新手恢复", async () => {
+test("点击头像展示昵称及安全头像；本人手牌反复翻转、同步保留隐藏、新局恢复", async () => {
   const { elements, sockets } = mount([roomResponse()]);
   await new Promise(setImmediate); authenticate(sockets[0]);
   const first = gameSnapshot();
@@ -393,7 +393,7 @@ test("自动认证后等到快照才允许行动，发送操作后等待服务�
   assert.equal(elements["table-notice"].textContent, "下注已过期");
 });
 
-test("隐藏对手底牌，忽略旧快照，同一手不重复发牌；新手触发两轮动画", async () => {
+test("隐藏对手底牌，忽略旧快照，同一局不重复发牌；新手触发两轮动画", async () => {
   const { elements, sockets } = mount([roomResponse()]);
   await new Promise(setImmediate); authenticate(sockets[0]);
   const first = gameSnapshot(); sockets[0].receive({ type: "SNAPSHOT", payload: first });
@@ -564,7 +564,7 @@ test("服务端授权暂停、继续和关闭也不恢复入口或发送对应�
   assert.equal(sockets[0].sent.length, sent);
 });
 
-test("开局后本手和等待下一手都隐藏准备，新成员标明下局加入且不获当前手牌", async () => {
+test("开局后本局和等待下一局都隐藏准备，新成员标明下一局加入且不获当前牌局", async () => {
   const { elements, sockets } = mount([roomResponse()]);
   await new Promise(setImmediate); authenticate(sockets[0]);
   const member = { userId: "new", seatIndex: 3, nickname: "新玩家", ready: true, state: "READY", participation: "WAITING_NEXT_HAND", stack: 200 };
@@ -572,15 +572,15 @@ test("开局后本手和等待下一手都隐藏准备，新成员标明下局�
     roomMembers: [member], room: { playState: "RUNNING", settings: { maxSeats: 6 } } });
   sockets[0].receive({ type: "SNAPSHOT", payload: first });
   assert.equal(elements["ready-player"].hidden, true); assert.equal(elements["unready-player"].hidden, true);
-  assert.equal(elements["self-state"].textContent, "下局加入");
-  assert.ok(descendants(elements["table-seats"]).some(node => node.className === "seat-next-hand" && node.textContent === "下局加入"));
+  assert.equal(elements["self-state"].textContent, "下一局加入");
+  assert.ok(descendants(elements["table-seats"]).some(node => node.className === "seat-next-hand" && node.textContent === "下一局加入"));
   assert.ok(!descendants(elements["table-seats"]).some(node => node.className === "seat-readiness"));
   assert.equal(elements["call-action"].disabled, true);
   const seat = elements["table-seats"].children.find(node => node.getAttribute("data-seat-index") === "3");
   assert.ok(!descendants(seat).some(node => node.className === "hole-cards"));
   const complete = { ...first, revision: 2, game: { ...first.game, phase: "complete", legal: null } };
   sockets[0].receive({ type: "SNAPSHOT", payload: complete });
-  assert.equal(elements["self-state"].textContent, "下局加入");
+  assert.equal(elements["self-state"].textContent, "下一局加入");
   assert.equal(elements["ready-player"].hidden, true); assert.equal(elements["unready-player"].hidden, true);
   const next = { ...first, revision: 3, game: { ...first.game, handId: "H2", turn: 3, players: [...first.game.players, { ...member, hole: ["As", "Ks"] }] } };
   sockets[0].receive({ type: "SNAPSHOT", payload: next });
@@ -589,13 +589,13 @@ test("开局后本手和等待下一手都隐藏准备，新成员标明下局�
   assert.equal(elements["call-action"].disabled, false);
 });
 
-test("本手起身经自定义确认只发 STAND_UP，服务端确认后转旁观并保留弃牌特效", async () => {
+test("本局起身经自定义确认只发 STAND_UP，服务端确认后转旁观并保留弃牌特效", async () => {
   const { elements, sockets } = mount([roomResponse()]);
   await new Promise(setImmediate); authenticate(sockets[0]);
   const first = gameSnapshot(); first.self.allowedCommands = ["STAND_UP"];
   sockets[0].receive({ type: "SNAPSHOT", payload: first });
   const confirmed = elements["stand-up"].listeners.click();
-  assert.match(elements["stand-dialog-description"].textContent, /立即放弃本手.*底池/);
+  assert.match(elements["stand-dialog-description"].textContent, /立即放弃本局.*底池/);
   elements["confirm-stand"].listeners.click(); await confirmed;
   assert.deepEqual(sockets[0].sent.at(-1).payload, {}); assert.equal(sockets[0].sent.at(-1).type, "STAND_UP");
   assert.ok(!sockets[0].sent.some(frame => frame.type === "ACTION"));
@@ -606,7 +606,7 @@ test("本手起身经自定义确认只发 STAND_UP，服务端确认后转旁�
   assert.ok(descendants(elements["table-seats"]).some(node => node.className === "seat-state" && node.textContent === "已弃牌"));
 });
 
-test("服务端主动结束时继续完成当前手并显示结算提示", async () => {
+test("服务端主动结束时继续完成当前局并显示结算提示", async () => {
   const { elements, sockets } = mount([roomResponse()]);
   await new Promise(setImmediate); authenticate(sockets[0]);
   const first = gameSnapshot();
@@ -617,7 +617,7 @@ test("服务端主动结束时继续完成当前手并显示结算提示", async
   assert.equal(elements["start-hand"].disabled, true);
 });
 
-test("旧服务没有本手起身授权时说明原因，不假装完成", async () => {
+test("旧服务没有本局起身授权时说明原因，不假装完成", async () => {
   const { elements, sockets } = mount([roomResponse()]);
   await new Promise(setImmediate); authenticate(sockets[0]);
   sockets[0].receive({ type: "SNAPSHOT", payload: gameSnapshot() });
@@ -1089,12 +1089,12 @@ test("随机落座使用服务端真实座号，不同座号均旋转到正下�
   }
 });
 
-test("本手结算明确标记赢家并把底池动画移向赢家，重复快照不重复播放，成员筹码用账本", async () => {
+test("本局结算明确标记赢家并把底池动画移向赢家，重复快照不重复播放，成员筹码用账本", async () => {
   const { elements, sockets } = mount([roomResponse()]);
   await new Promise(setImmediate); authenticate(sockets[0]);
   const first = gameSnapshot(); sockets[0].receive({ type: "SNAPSHOT", payload: first });
   const player = first.game.players[0];
-  const complete = { ...first, revision: 2, game: { ...first.game, phase: "complete", pot: 300, result: { winners: [player.seatIndex], message: "本手已结算", hands: null } },
+  const complete = { ...first, revision: 2, game: { ...first.game, phase: "complete", pot: 300, result: { winners: [player.seatIndex], message: "本局已结算", hands: null } },
     roomMembers: [{ ...player, stack: 500, state: "SEATED", totalBuyIn: 200 }] };
   sockets[0].receive({ type: "SNAPSHOT", payload: complete });
   const winner = elements["table-seats"].children.find(s => s.className.includes(" winner"));
@@ -1128,7 +1128,7 @@ test("重连直接看到结算只显示赢家，不重放派奖；多赢家无�
   assert.equal(badges.length, first.game.players.length); assert.ok(badges.every(n => n.textContent === "获胜"));
 });
 
-test("零筹码等人数时提示补筹码，确认到账后服务端直接发下一手，不发准备或开始命令", async () => {
+test("零筹码等人数时提示补筹码，确认到账后服务端直接发下一局，不发准备或开始命令", async () => {
   const { elements, sockets } = mount([roomResponse()]);
   await new Promise(setImmediate); authenticate(sockets[0]);
   const first = gameSnapshot();
@@ -1154,7 +1154,7 @@ test("零筹码等人数时提示补筹码，确认到账后服务端直接发�
   sockets[0].receive({ type: "SNAPSHOT", payload: { ...funded, revision: 3, room: { ...funded.room, nextHand: { status: "IDLE" } },
     game: { ...first.game, handId: "H2", handNumber: 2 } } });
   assert.equal(elements["next-hand-countdown"].hidden, true);
-  assert.match(elements["table-phase"].textContent, /第 2 手/);
+  assert.match(elements["table-phase"].textContent, /第 2 局/);
   assert.equal(elements["call-action"].disabled, false);
   assert.ok(!sockets[0].sent.some(frame => ["READY", "START_HAND", "RESUME_GAME"].includes(frame.type)));
 });
@@ -1169,16 +1169,16 @@ test("十秒倒计时不被新快照重置，到零不发送开始指令，服�
     room: { ...first.room, playState: "RUNNING", nextHand: { status: "COUNTDOWN", sourceHandId: first.game.handId, startsAt: new Date(now + 10000).toISOString() } },
     game: { ...first.game, phase: "complete", result: { winners: [first.game.players[0].seatIndex], hands: null } } };
   sockets[0].receive({ type: "SNAPSHOT", payload: complete });
-  assert.equal(elements["next-hand-countdown"].textContent, "下一手 · 10s");
+  assert.equal(elements["next-hand-countdown"].textContent, "下一局 · 10s");
   assert.equal(elements["start-hand"].hidden, true);
   now += 6000;
   sockets[0].receive({ type: "SNAPSHOT", payload: { ...complete, revision: 3, serverTime: new Date(now).toISOString() } });
-  assert.equal(elements["next-hand-countdown"].textContent, "下一手 · 4s");
+  assert.equal(elements["next-hand-countdown"].textContent, "下一局 · 4s");
   now += 4000; for (const tick of intervals.values()) tick();
   assert.equal(elements["next-hand-countdown"].textContent, "正在等待服务端发牌…");
   assert.ok(!sockets[0].sent.some(f => ["READY", "START_HAND"].includes(f.type)));
   sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: 4, game: { ...first.game, handId: "H2", handNumber: 2 } } });
-  assert.equal(elements["next-hand-countdown"].hidden, true); assert.match(elements["table-phase"].textContent, /第 2 手/);
+  assert.equal(elements["next-hand-countdown"].hidden, true); assert.match(elements["table-phase"].textContent, /第 2 局/);
 });
 
 test("结算后起身或换人占座不把旧赢家和底牌显示到新用户身上", async () => {
@@ -1213,7 +1213,7 @@ test("旧服务结算展示十秒不因快照更新重置，历史停止状态�
   now += 6000; sockets[0].receive({ type: "SNAPSHOT", payload: { ...complete, revision: 2 } });
   assert.equal(elements["next-hand-countdown"].textContent, "结算展示 · 4s");
   now += 4000; for (const tick of intervals.values()) tick();
-  assert.equal(elements["next-hand-countdown"].textContent, "等待服务端开启下一手");
+  assert.equal(elements["next-hand-countdown"].textContent, "等待服务端开启下一局");
   sockets[0].receive({ type: "SNAPSHOT", payload: { ...complete, revision: 3, room: { ...complete.room, playState: "PAUSED" } } });
   assert.equal(elements["next-hand-countdown"].textContent, "等待服务端继续牌局");
 });
@@ -1232,7 +1232,7 @@ test("摊牌时即使服务误传底牌也不公开弃牌对手，本人仍可�
   assert.ok(opponent.children.every(n => n.className.includes("back")));
 });
 
-test("全下与弃牌状态沿用本手玩家，下注金额展示本轮累计且结算后清除", async () => {
+test("全下与弃牌状态沿用本局玩家，下注金额展示本轮累计且结算后清除", async () => {
   let now = Date.now(); class ClockDate extends Date { static now() { return now; } }
   const { elements, sockets } = mount([roomResponse()], "", { Date: ClockDate });
   await new Promise(setImmediate); authenticate(sockets[0]);
@@ -1314,7 +1314,7 @@ test("已结束房间打开或刷新立即展示完整结算排名，不连接 W
   assert.equal(descendants(rows[0]).find(p => p.className.includes("settlement-profit")).textContent, "+100");
   assert.equal(descendants(rows[1]).find(p => p.className.includes("settlement-profit")).textContent, "0");
   assert.match(descendants(rows[2]).find(p => p.className.includes("settlement-profit")).className, /profit-negative/);
-  assert.equal(descendants(rows[2]).find(p => p.className === "settlement-hands").textContent, "手数 3");
+  assert.equal(descendants(rows[2]).find(p => p.className === "settlement-hands").textContent, "参与局数 3");
   assert.equal(descendants(rows[2]).find(p => p.className === "settlement-buy-in").textContent, "带入 200");
 });
 test("到期不结束未完成手牌，最终关房快照后按服务端截止十秒自动进入结算", async () => {
@@ -1326,7 +1326,7 @@ test("到期不结束未完成手牌，最终关房快照后按服务端截止�
     room: { ...first.room, timing: { status: "OPEN", endsAt: new Date(now + 65000).toISOString() } } } });
   assert.equal(elements["session-countdown"].textContent, "剩余 00:00:05");
   now += 5000; for (const tick of intervals.values()) tick();
-  assert.equal(elements["session-countdown"].textContent, "时间已到 · 本手结束后结算");
+  assert.equal(elements["session-countdown"].textContent, "时间已到 · 本局结束后结算");
   assert.equal(elements["fold-action"].disabled, false);
   assert.equal(elements["settlement-panel"].hidden, true);
   const closed = finalSnapshot(now + 60000);
@@ -1458,7 +1458,7 @@ test("历史空记录、早期记录缺失和接口未部署均有可恢复提�
   assert.equal(elements["history-hand"].hidden, true); assert.equal(elements["history-next"].disabled, true);
   elements["refresh-history"].listeners.click(); await new Promise(setImmediate);
   assert.equal(calls.length, 4); assert.equal(elements["history-coverage"].hidden, false);
-  assert.equal(elements["history-coverage"].textContent, "仅保存第 3 手之后的记录");
+  assert.equal(elements["history-coverage"].textContent, "仅保存第 3 局之后的记录");
 });
 
 test("失败重试保留切换目标，错误房间响应不会覆盖已显示的历史", async () => {
@@ -1515,7 +1515,7 @@ test("历史只公开合法摊牌，服务误传的弃牌对手底牌和牌型�
   assert.equal(visible.children[1].children[0].children[0].attributes["aria-label"], "A♠");
 });
 
-test("历史手数不连续时使用实际序号及相邻记录导航", async () => {
+test("历史局数不连续时使用实际序号及相邻记录导航", async () => {
   const first = historyResponse(102, { throughHandNumber: 102, totalHands: 2, position: 2, firstHandNumber: 100, lastHandNumber: 102, previousHandNumber: 100, nextHandNumber: null, coverage: { status: "PARTIAL" } });
   const second = historyResponse(100, { throughHandNumber: 102, totalHands: 2, position: 1, firstHandNumber: 100, lastHandNumber: 102, previousHandNumber: null, nextHandNumber: 102, coverage: { status: "PARTIAL" } });
   const { elements, calls } = mount([roomResponse(), first, second]);
@@ -1550,7 +1550,7 @@ test("真实页面默认开启音效，服务端确认下注才响，重复快�
   sockets[1].receive({ type: "SNAPSHOT", payload: ended }); assert.equal(sound.nodes.length, enabledCount);
 });
 
-test("音效关闭状态在页面初始化恢复；行动和下一手计时随服务端时间提示且每秒去重", async () => {
+test("音效关闭状态在页面初始化恢复；行动和下一局计时随服务端时间提示且每秒去重", async () => {
   const saved = fakeSoundEnvironment("false");
   const muted = mount([roomResponse()], "", { sound: saved }); await new Promise(setImmediate);
   assert.equal(muted.elements["sound-toggle"].attributes["aria-pressed"], "false");
@@ -1576,7 +1576,7 @@ test("音效关闭状态在页面初始化恢复；行动和下一手计时随�
   now += 1000; for (const tick of intervals.values()) tick(); assert.equal(sound.nodes.length, 3);
   sockets[1].receive({ type: "SNAPSHOT", payload: { ...completed, revision: 3, serverTime: new Date(now).toISOString() } });
   assert.equal(sound.nodes.length, 3);
-  assert.equal(elements["next-hand-countdown"].textContent, "下一手 · 3s");
+  assert.equal(elements["next-hand-countdown"].textContent, "下一局 · 3s");
 });
 
 test("弃牌周边倒计时跟随服务器截止平滑缩减，刷新快照不重置，归零不发送弃牌", async () => {
@@ -1738,7 +1738,7 @@ test("多赢家展示各自牌型和奖额，胜利画面只播一次，到时�
   assert.equal(elements["table-seats"].children.filter(n => n.className.includes(" winner")).length, 2);
 });
 
-test("胜利头像优先本手玩家和同身份成员；本人获胜才有彩屑，旁观或同座位新用户不会继承", async () => {
+test("胜利头像优先本局玩家和同身份成员；本人获胜才有彩屑，旁观或同座位新用户不会继承", async () => {
   for (const scenario of ["self", "opponent", "spectator", "replacement"]) {
     const { elements, sockets } = mount([roomResponse()]);
     await new Promise(setImmediate); authenticate(sockets[0]);

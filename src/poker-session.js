@@ -13,7 +13,7 @@ export function sessionClock(view, now = Date.now()) {
   const end = Date.parse(view?.room?.timing?.endsAt || "");
   if (view?.room?.timing?.status === "ENDING" || Number.isFinite(end) && now >= end) {
     const reason = view?.room?.timing?.reason === "HOST_CLOSED" ? "房主已结束本场" : "时间已到";
-    return { visible: true, text: reason + (view?.game && view.game.phase !== "complete" ? " · 本手结束后结算" : " · 等待结算"), status: "ENDING", seconds: 0 };
+    return { visible: true, text: reason + (view?.game && view.game.phase !== "complete" ? " · 本局结束后结算" : " · 等待结算"), status: "ENDING", seconds: 0 };
   }
   if (!Number.isFinite(end)) return view?.room?.timing?.status === "WAITING"
     ? { visible: true, text: "等待房主开始游戏", status: "WAITING", seconds: null }
