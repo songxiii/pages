@@ -739,15 +739,31 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
   function animateVictory(awards) {
     clearVictory();
     $("victory-title").textContent = awards.length > 1 ? "共同获胜" : "本局获胜";
-    for (let i = 0; i < (awards.some(isOwnAward) ? 36 : 0); i++) {
-      const piece = node("span", "victory-confetti-piece");
-      piece.style.setProperty("--confetti-x", (i * 37 % 100) + "%");
-      piece.style.setProperty("--confetti-drift", (i % 2 ? 1 : -1) * (20 + i % 5 * 15) + "px");
-      piece.style.setProperty("--confetti-delay", i % 9 * 65 + "ms");
-      piece.style.setProperty("--confetti-color", ["#ffe6a3", "#eabd62", "#fff7de", "#77dbc4"][i % 4]);
-      $("victory-confetti").append(piece);
-    }
     $("victory-layer").hidden = false;
+    const ownAward = awards.find(isOwnAward);
+    const originAvatar = ownAward && (avatarTargets.get(ownAward.seatIndex)
+      || [...$("victory-portraits").children].find(p => p.getAttribute("data-winner-seat") === String(ownAward.seatIndex)));
+    const confetti = $("victory-confetti");
+    const stage = $("table-stage").getBoundingClientRect();
+    if (originAvatar) {
+      const avatar = originAvatar.getBoundingClientRect();
+      confetti.style.setProperty("--burst-origin-x", avatar.left + avatar.width / 2 - stage.left + "px");
+      confetti.style.setProperty("--burst-origin-y", avatar.top + avatar.height / 2 - stage.top + "px");
+    }
+    // Two cheers fan upward from the winner's actual avatar, then fall with gravity.
+    for (let i = 0; i < (originAvatar ? 36 : 0); i++) {
+      const piece = node("span", "victory-confetti-piece");
+      const angle = (-158 + i % 18 * 8) * Math.PI / 180;
+      const strength = .7 + (i * 7 % 11) * .03;
+      piece.setAttribute("data-source-seat", String(ownAward.seatIndex));
+      piece.style.setProperty("--burst-dx", Math.cos(angle) * stage.width * .46 * strength + "px");
+      piece.style.setProperty("--burst-dy", Math.sin(angle) * Math.min(600, stage.height * 1.3) * strength + "px");
+      piece.style.setProperty("--burst-gravity", Math.min(600, stage.height * .95) + "px");
+      piece.style.setProperty("--confetti-delay", Math.floor(i / 18) * 240 + i % 3 * 20 + "ms");
+      piece.style.setProperty("--burst-spin", (i % 2 ? 1 : -1) * (360 + i % 4 * 180) + "deg");
+      piece.style.setProperty("--confetti-color", ["#ffe6a3", "#eabd62", "#fff7de", "#77dbc4"][i % 4]);
+      confetti.append(piece);
+    }
     $("table-stage").setAttribute("data-celebrating", "true");
     victoryCleanupTimer = setTimeout(clearVictory, 3600);
   }

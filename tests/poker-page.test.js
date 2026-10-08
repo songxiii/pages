@@ -1791,3 +1791,33 @@ test("非法赢家头像地址使用昵称首字，本人头像可从self回退�
   sockets[0].receive({ type: "SNAPSHOT", payload: { ...ended, revision: 3 } });
   assert.equal(elements["victory-confetti"].children[0], confetti[0]);
 });
+
+test("本人获胜礼花从座位头像中心喷出，向两侧上扬，重复快照不改变喷射起点", async () => {
+  const { elements, sockets, document } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const first = gameSnapshot(); sockets[0].receive({ type: "SNAPSHOT", payload: first });
+  elements["table-stage"].getBoundingClientRect = () => ({ left: 80, top: 40, width: 390, height: 650 });
+  const createElement = document.createElement;
+  document.createElement = () => {
+    const el = createElement();
+    const bounds = el.getBoundingClientRect;
+    el.getBoundingClientRect = () => el.className === "seat-avatar"
+      ? { left: 250, top: 620, width: 54, height: 54 } : bounds.call(el);
+    return el;
+  };
+  const ended = { ...first, revision: 2, game: { ...first.game, phase: "complete", result: { winners: [0], hands: ["同花", "一对"] } } };
+  sockets[0].receive({ type: "SNAPSHOT", payload: ended });
+  const layer = elements["victory-confetti"];
+  assert.equal(layer.style.values["--burst-origin-x"], "197px");
+  assert.equal(layer.style.values["--burst-origin-y"], "607px");
+  const pieces = layer.children;
+  assert.equal(pieces.length, 36);
+  assert.ok(pieces.every(p => p.attributes["data-source-seat"] === "0"));
+  assert.ok(pieces.every(p => parseFloat(p.style.values["--burst-dy"]) < 0));
+  assert.ok(pieces.some(p => parseFloat(p.style.values["--burst-dx"]) < 0));
+  assert.ok(pieces.some(p => parseFloat(p.style.values["--burst-dx"]) > 0));
+  assert.ok(pieces.every(p => parseFloat(p.style.values["--burst-gravity"]) > 0));
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...ended, revision: 3 } });
+  assert.equal(layer.children[0], pieces[0]);
+  assert.equal(layer.style.values["--burst-origin-x"], "197px");
+});
