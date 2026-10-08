@@ -676,6 +676,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     $("table-result").textContent = awards.length ? awards.map(winnerText).join("；") : game?.result?.message || "";
     $("table-result").setAttribute("title", $("table-result").textContent);
     // Keep the visible celebration current without restarting its animation on snapshots.
+    renderVictoryPortraits(awards);
     $("victory-winners").replaceChildren(...awards.map(award => {
       const row = node("p", "victory-winner");
       row.append(node("span", "victory-winner-name", award.nickname), node("span", "victory-winner-detail",
@@ -702,6 +703,33 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
       lastPaidHand = handKey; animatePayout(awards); animateVictory(awards);
     }
   }
+  function isOwnAward(award) {
+    const selfId = identity(view.self);
+    if (selfId != null && award.userId != null) return String(selfId) === String(award.userId);
+    const seat = ownSeat(view);
+    return seat !== null && seat === award.seatIndex;
+  }
+  function renderVictoryPortraits(awards) {
+    const portraits = $("victory-portraits");
+    portraits.setAttribute("data-count", String(awards.length));
+    portraits.replaceChildren(...awards.map(award => {
+      const player = game.players.find(p => p.seatIndex === award.seatIndex);
+      const member = (view.roomMembers || []).find(m => award.userId != null
+        ? identity(m) != null && String(award.userId) === String(identity(m))
+        : seatIndex(m) !== null && Number(seatIndex(m)) === award.seatIndex);
+      const avatarUrl = safeAvatar(player?.avatarUrl) || safeAvatar(member?.avatarUrl)
+        || (isOwnAward(award) ? safeAvatar(view.self?.avatarUrl) : null);
+      const portrait = node("div", "victory-portrait");
+      portrait.setAttribute("data-winner-seat", String(award.seatIndex));
+      portrait.setAttribute("title", award.nickname);
+      portrait.append(node("span", "victory-monogram", [...award.nickname][0]));
+      if (avatarUrl) {
+        const img = node("img", ""); img.src = avatarUrl; img.alt = award.nickname + "的头像"; img.referrerPolicy = "no-referrer";
+        img.addEventListener("error", () => img.remove()); portrait.append(img);
+      } else portrait.setAttribute("aria-label", award.nickname + "的头像");
+      return portrait;
+    }));
+  }
   function clearVictory() {
     clearTimeout(victoryCleanupTimer);
     $("victory-layer").hidden = true;
@@ -711,7 +739,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
   function animateVictory(awards) {
     clearVictory();
     $("victory-title").textContent = awards.length > 1 ? "共同获胜" : "本手获胜";
-    for (let i = 0; i < 36; i++) {
+    for (let i = 0; i < (awards.some(isOwnAward) ? 36 : 0); i++) {
       const piece = node("span", "victory-confetti-piece");
       piece.style.setProperty("--confetti-x", (i * 37 % 100) + "%");
       piece.style.setProperty("--confetti-drift", (i % 2 ? 1 : -1) * (20 + i % 5 * 15) + "px");

@@ -1711,6 +1711,7 @@ test("多赢家展示各自牌型和奖额，胜利画面只播一次，到时�
   const { elements, sockets, timeouts } = mount([roomResponse()]);
   await new Promise(setImmediate); authenticate(sockets[0]);
   const first = gameSnapshot();
+  first.self = { ...first.self, userId: "a", seatIndex: 4 };
   first.game.players = [
     { seatIndex: 4, userId: "a", nickname: "甲", stack: 200, hole: ["Ah", "Kh"] },
     { seatIndex: 1, userId: "b", nickname: "乙", stack: 200, hole: ["As", "Ks"] },
@@ -1726,7 +1727,8 @@ test("多赢家展示各自牌型和奖额，胜利画面只播一次，到时�
   const confetti = elements["victory-confetti"].children;
   assert.equal(confetti.length, 36);
   const winners = elements["table-seats"].children.filter(n => n.className.includes(" winner"));
-  assert.deepEqual(Array.from(winners, n => descendants(n).find(c => c.className === "seat-hand-name").textContent), ["顺子", "同花"]);
+  assert.deepEqual(Array.from(winners, n => descendants(n).find(c => c.className === "seat-hand-name").textContent), ["同花", "顺子"]);
+  assert.equal(elements["victory-portraits"].children.length, 2);
   sockets[0].receive({ type: "SNAPSHOT", payload: { ...ended, revision: 3 } });
   assert.equal(elements["victory-confetti"].children[0], confetti[0]);
   for (const callback of [...timeouts.values()]) callback();
@@ -1734,4 +1736,58 @@ test("多赢家展示各自牌型和奖额，胜利画面只播一次，到时�
   sockets[0].receive({ type: "SNAPSHOT", payload: { ...ended, revision: 4 } });
   assert.equal(elements["victory-layer"].hidden, true);
   assert.equal(elements["table-seats"].children.filter(n => n.className.includes(" winner")).length, 2);
+});
+
+test("胜利头像优先本手玩家和同身份成员；本人获胜才有彩屑，旁观或同座位新用户不会继承", async () => {
+  for (const scenario of ["self", "opponent", "spectator", "replacement"]) {
+    const { elements, sockets } = mount([roomResponse()]);
+    await new Promise(setImmediate); authenticate(sockets[0]);
+    const first = gameSnapshot();
+    first.self = { ...first.self, userId: "me", seatIndex: scenario === "spectator" ? null : 0, avatarUrl: "https://example.com/self.jpg" };
+    first.game.players = first.game.players.map((p, i) => ({ ...p, userId: i === 0 ? "me" : "other" }));
+    const winnerSeat = scenario === "opponent" || scenario === "spectator" ? 1 : 0;
+    if (winnerSeat === 1) first.game.players[1].avatarUrl = "https://example.com/other.jpg";
+    first.roomMembers = first.game.players.map(p => ({ ...p, avatarUrl: p.seatIndex === 0 ? "https://example.com/member-me.jpg" : "https://example.com/member-other.jpg" }));
+    sockets[0].receive({ type: "SNAPSHOT", payload: first });
+    const ended = { ...first, revision: 2, game: { ...first.game, phase: "complete", result: { winners: [winnerSeat], hands: ["同花", "两对"] } } };
+    if (scenario === "replacement") {
+      ended.self = { ...first.self, userId: "replacement", avatarUrl: "https://example.com/replacement.jpg" };
+      ended.roomMembers = [{ ...first.roomMembers[0], userId: "replacement", avatarUrl: "https://example.com/replacement.jpg" }];
+    }
+    sockets[0].receive({ type: "SNAPSHOT", payload: ended });
+    assert.equal(elements["victory-layer"].hidden, false);
+    assert.equal(elements["victory-portraits"].children.length, 1);
+    const portrait = elements["victory-portraits"].children[0];
+    assert.equal(portrait.attributes["data-winner-seat"], String(winnerSeat));
+    const image = portrait.children.find(n => n.src);
+    if (scenario === "replacement") {
+      assert.equal(image, undefined);
+      assert.equal(portrait.children[0].textContent, "本");
+    } else {
+      assert.equal(image.src, winnerSeat === 1 ? "https://example.com/other.jpg" : "https://example.com/member-me.jpg");
+      assert.equal(image.referrerPolicy, "no-referrer");
+      image.listeners.error(); assert.equal(image.removed, true);
+    }
+    assert.equal(elements["victory-confetti"].children.length, scenario === "self" ? 36 : 0);
+  }
+});
+
+test("非法赢家头像地址使用昵称首字，本人头像可从self回退，重复快照不重播彩屑", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const first = gameSnapshot();
+  first.self.avatarUrl = "https://example.com/self.jpg";
+  first.game.players[0].avatarUrl = "javascript:alert(1)";
+  first.game.players[1].avatarUrl = "data:image/svg+xml,<svg/>";
+  sockets[0].receive({ type: "SNAPSHOT", payload: first });
+  const ended = { ...first, revision: 2, game: { ...first.game, phase: "complete", result: { winners: [0, 1], hands: ["同花", "同花"] } } };
+  sockets[0].receive({ type: "SNAPSHOT", payload: ended });
+  const portraits = elements["victory-portraits"].children;
+  assert.equal(portraits[0].children[1].src, "https://example.com/self.jpg");
+  assert.equal(portraits[1].children.length, 1);
+  assert.equal(portraits[1].children[0].textContent, "对");
+  const confetti = elements["victory-confetti"].children;
+  assert.equal(confetti.length, 36);
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...ended, revision: 3 } });
+  assert.equal(elements["victory-confetti"].children[0], confetti[0]);
 });
