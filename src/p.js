@@ -173,7 +173,7 @@ function renderSettlement() {
     const profile = summaryNode("div", "settlement-profile"), name = summaryNode("strong", "settlement-name", player.nickname || "玩家");
     name.setAttribute("title", player.nickname || "玩家");
     const details = summaryNode("div", "settlement-player-meta");
-    details.append(summaryNode("span", "", "ID: " + player.userId), summaryNode("span", "settlement-hands", "参与局数 " + (player.handsPlayed === null ? "—" : formatChips(player.handsPlayed))));
+    details.append(summaryNode("span", "settlement-hands", "参与局数 " + (player.handsPlayed === null ? "—" : formatChips(player.handsPlayed))));
     profile.append(name, details);
     const balance = summaryNode("div", "settlement-balance");
     balance.append(summaryNode("strong", "settlement-profit" + (player.netChips > 0 ? " profit-positive" : player.netChips < 0 ? " profit-negative" : ""), player.netChips === null ? "—" : player.netChips > 0 ? "+" + formatChips(player.netChips) : formatChips(player.netChips)),
