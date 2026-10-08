@@ -429,7 +429,7 @@ export function createPokerTable({ document, onAction, onCommand, onError = () =
     $("stand-detail").textContent = controls.canStand ? "起身将立即放弃本局，已下注筹码留在底池，随后转为旁观。" : "服务端尚未授权本局起身，需要支持起身时立即弃牌。";
     $("ready-player").hidden = !controls.canReady;
     $("ready-player").disabled = !enabledControl || !controls.canReady;
-    $("raise-toggle").hidden = controls.canReady;
+    for (const id of ["fold-action", "call-action", "raise-toggle"]) $(id).hidden = !controls.started;
     $("unready-player").hidden = !controls.ready;
     $("unready-player").disabled = !enabledControl || !controls.canUnready;
     $("ready-detail").hidden = !controls.ready || controls.canUnready;
