@@ -818,6 +818,14 @@ button.seat-avatar:focus-visible { outline:2px solid var(--gold); outline-offset
   color:var(--gold);
   border-color:#c7ae754a;
 }
+.table-action.ready-action {
+  grid-column:3;
+  color:#251b0d;
+  border-color:#ead29b;
+  background:linear-gradient(#f3dda9,#d8b675 60%,#bc9657);
+  font-weight:700;
+}
+.table-action.ready-action:hover:not(:disabled) { background:linear-gradient(#ffecc5,#e7c78b 60%,#cda86a); }
 .raise-presets {
   display:grid;
   grid-template-columns:repeat(4,minmax(0,1fr));

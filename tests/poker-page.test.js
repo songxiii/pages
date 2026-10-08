@@ -813,6 +813,38 @@ test("连接失败和关闭仅显示状态，背景重试 HTTP 失败保留牌�
   assert.match(elements["table-notice"].textContent, /自动重连未成功/);
 });
 
+test("主页面准备按钮在落座后显示，提交失败可重试，准备确认后隐藏", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const spectator = lobbySnapshot();
+  sockets[0].receive({ type: "SNAPSHOT", payload: spectator });
+  assert.equal(elements["ready-player"].hidden, true);
+  assert.equal(elements["raise-toggle"].hidden, false);
+  const seated = { ...spectator, revision: 2,
+    self: { ...spectator.self, seatIndex: 0, roomState: "SEATED", allowedCommands: ["READY", "STAND_UP"] },
+    roomMembers: [...spectator.roomMembers, { userId: "host", seatIndex: 0, state: "SEATED", ready: false }] };
+  sockets[0].receive({ type: "SNAPSHOT", payload: seated });
+  assert.equal(elements["ready-player"].hidden, false);
+  assert.equal(elements["ready-player"].disabled, false);
+  assert.equal(elements["raise-toggle"].hidden, true);
+  elements["ready-player"].listeners.click();
+  assert.equal(sockets[0].sent.at(-1).type, "READY");
+  assert.deepEqual(sockets[0].sent.at(-1).payload, {});
+  assert.equal(elements["ready-player"].disabled, true);
+  elements["ready-player"].listeners.click();
+  assert.equal(sockets[0].sent.filter(frame => frame.type === "READY").length, 1);
+  sockets[0].receive({ type: "ERROR", requestId: sockets[0].sent.at(-1).requestId,
+    payload: { message: "准备失败，请重试" } });
+  assert.equal(elements["ready-player"].hidden, false);
+  assert.equal(elements["ready-player"].disabled, false);
+  elements["ready-player"].listeners.click();
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...seated, revision: 3,
+    self: { ...seated.self, roomState: "READY", allowedCommands: ["UNREADY", "STAND_UP"] },
+    roomMembers: seated.roomMembers.map(member => member.userId === "host" ? { ...member, state: "READY", ready: true } : member) } });
+  assert.equal(elements["ready-player"].hidden, true);
+  assert.equal(elements["raise-toggle"].hidden, false);
+});
+
 test("准备状态显示在头像边，已准备可取消，收到快照后才切换回准备按钮", async () => {
   const { elements, sockets } = mount([roomResponse()]);
   await new Promise(setImmediate); authenticate(sockets[0]);
