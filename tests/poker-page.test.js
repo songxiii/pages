@@ -229,7 +229,7 @@ test("展示、复制、连接使用修正后的云托管地址，并完成 AUTH
   [...intervals.values()][0]();
   assert.equal(socket.sent[1].type, "PING");
   socket.receive({ type: "SNAPSHOT", payload: { counts: { ...counts, onlineCount: 1 } } });
-  assert.equal(elements["online-count"].textContent, "1");
+  assert.equal(elements["online-count"], undefined);
   socket.onclose({ code: 4001, reason: "AUTH_TIMEOUT" });
   assert.match(elements["ws-detail"].textContent, /4001.*AUTH_TIMEOUT/);
   assert.equal(intervals.size, 0);
@@ -426,7 +426,7 @@ test("旁观者不可行动；服务端授权后才显示入座准备选项；�
   assert.equal(elements["room-panel"].hidden, true);
 });
 
-test("本人换座后仍在正下方，D/SB/BB 随最新牌局正确换位，双人可同时显示庄位与小盲", async () => {
+test("本人换座后仍在正下方，D/SB/BB 随最新牌局正确换位，双人同时保留D和SB且不显示中文位置", async () => {
   const { elements, sockets } = mount([roomResponse()]);
   await new Promise(setImmediate); authenticate(sockets[0]);
   const first = gameSnapshot({ room: { settings: { maxSeats: 2 } } });
@@ -445,8 +445,7 @@ test("本人换座后仍在正下方，D/SB/BB 随最新牌局正确换位，双
   assert.equal(seats[0].style.values["--x"], "50%");
   assert.deepEqual(badges(seats[0]), ["BB"]);
   assert.deepEqual(badges(seats[1]), ["D", "SB"]);
-  assert.equal(descendants(seats[0]).find((node) => node.className === "seat-position").textContent, "大盲");
-  assert.equal(descendants(seats[1]).find((node) => node.className === "seat-position").textContent, "庄位/小盲");
+  assert.ok(!descendants(elements["table-seats"]).some(node => node.className === "seat-position"));
 });
 
 function lobbySnapshot(overrides = {}) {
@@ -1108,9 +1107,12 @@ test("本手结算明确标记赢家并把底池动画移向赢家，重复快�
   assert.ok(!descendants(elements["members-list"]).some(n => n.className === "member-stack" || n.textContent.startsWith("当前筹码")));
   sockets[0].receive({ type: "SNAPSHOT", payload: { ...complete, revision: 3 } });
   assert.equal(elements["payout-layer"].children[0], chips[0]);
+  assert.equal(elements["victory-layer"].hidden, false);
   sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, revision: 4, game: { ...first.game, handId: "H2" } } });
   assert.equal(elements["payout-layer"].children.length, 0);
   assert.equal(elements["next-hand-countdown"].hidden, true);
+  assert.equal(elements["victory-layer"].hidden, true);
+  assert.equal(elements["victory-confetti"].children.length, 0);
   assert.ok(!elements["table-seats"].children.some(s => s.className.includes(" winner")));
 });
 
@@ -1121,6 +1123,7 @@ test("重连直接看到结算只显示赢家，不重放派奖；多赢家无�
   sockets[0].receive({ type: "SNAPSHOT", payload: { ...first, game: { ...first.game, phase: "complete",
     result: { winners: first.game.players.map(p => p.seatIndex), hands: null } } } });
   assert.equal(elements["payout-layer"].children.length, 0);
+  assert.equal(elements["victory-layer"].hidden, true);
   const badges = descendants(elements["table-seats"]).filter(n => n.className === "seat-win");
   assert.equal(badges.length, first.game.players.length); assert.ok(badges.every(n => n.textContent === "获胜"));
 });
@@ -1687,4 +1690,48 @@ test("快照在过牌和跟注之间切换时，计时圈只挂到一个按钮�
   assert.equal(elements["fold-countdown-ring"].hidden, true);
   const action = sockets[0].sent.filter(frame => frame.type === "ACTION").at(-1);
   assert.equal(action.payload.action, "check");
+});
+
+
+test("座位和成员列表不展示在线离线，也不因断线降低头像亮度", async () => {
+  const { elements, sockets } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const first = gameSnapshot();
+  first.game.players = first.game.players.map((p, i) => ({ ...p, online: i === 0 }));
+  first.roomMembers = first.game.players.map(p => ({ ...p, state: "IN_HAND" }));
+  sockets[0].receive({ type: "SNAPSHOT", payload: first });
+  for (const id of ["table-seats", "members-list"]) {
+    assert.ok(!descendants(elements[id]).some(n => /在线|离线/.test(n.textContent)));
+    assert.ok(!descendants(elements[id]).some(n => /\boffline\b/.test(n.className)));
+  }
+  assert.equal(elements["online-count"], undefined);
+});
+
+test("多赢家展示各自牌型和奖额，胜利画面只播一次，到时收起仍保留座位高亮", async () => {
+  const { elements, sockets, timeouts } = mount([roomResponse()]);
+  await new Promise(setImmediate); authenticate(sockets[0]);
+  const first = gameSnapshot();
+  first.game.players = [
+    { seatIndex: 4, userId: "a", nickname: "甲", stack: 200, hole: ["Ah", "Kh"] },
+    { seatIndex: 1, userId: "b", nickname: "乙", stack: 200, hole: ["As", "Ks"] },
+  ];
+  sockets[0].receive({ type: "SNAPSHOT", payload: first });
+  const ended = { ...first, revision: 2, game: { ...first.game, phase: "complete", result: {
+    winners: [1, 4], hands: ["同花", "顺子"], payouts: [{ userId: "a", amount: 120 }, { userId: "b", amount: 80 }],
+  } } };
+  sockets[0].receive({ type: "SNAPSHOT", payload: ended });
+  assert.equal(elements["victory-layer"].hidden, false);
+  assert.equal(elements["victory-title"].textContent, "共同获胜");
+  assert.deepEqual(Array.from(elements["victory-winners"].children, n => Array.from(n.children, c => c.textContent)), [["甲", "同花 +120"], ["乙", "顺子 +80"]]);
+  const confetti = elements["victory-confetti"].children;
+  assert.equal(confetti.length, 36);
+  const winners = elements["table-seats"].children.filter(n => n.className.includes(" winner"));
+  assert.deepEqual(Array.from(winners, n => descendants(n).find(c => c.className === "seat-hand-name").textContent), ["顺子", "同花"]);
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...ended, revision: 3 } });
+  assert.equal(elements["victory-confetti"].children[0], confetti[0]);
+  for (const callback of [...timeouts.values()]) callback();
+  assert.equal(elements["victory-layer"].hidden, true);
+  sockets[0].receive({ type: "SNAPSHOT", payload: { ...ended, revision: 4 } });
+  assert.equal(elements["victory-layer"].hidden, true);
+  assert.equal(elements["table-seats"].children.filter(n => n.className.includes(" winner")).length, 2);
 });

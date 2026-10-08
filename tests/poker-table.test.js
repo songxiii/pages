@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ownSeat, tableLayout, raisePresets, handPositions, seatIndex, buyInOptions, memberAmounts, seatPositions, roomControls, handAwards, nextHandState, playerReady, waitingNextHand, memberStateText, needsChips, eligiblePlayerCount } from "../src/poker-table.js";
+import { ownSeat, tableLayout, raisePresets, handPositions, seatIndex, buyInOptions, memberAmounts, seatPositions, roomControls, handAwards, winningHandName, nextHandState, playerReady, waitingNextHand, memberStateText, needsChips, eligiblePlayerCount } from "../src/poker-table.js";
 
 test("等人数只统计有可用筹码的在座成员，不计旁观者、起身者或未到账筹码", () => {
   const view = { game: { handId: "H1", phase: "complete" }, room: { playState: "RUNNING", nextHand: { status: "WAITING_PLAYERS" } }, roomMembers: [
@@ -132,7 +132,7 @@ test("带入下拉只接受服务规定的安全整数、范围和增量，缺�
   assert.deepEqual(buyInOptions({}), []);
 });
 
-test("2–9人按本手参局顺序显示中文盲位和庄位、UTG等位置，跳过空座保留弃牌者", () => {
+test("2–9人庄盲位只保留标记，UTG等位置跳过空座保留弃牌者", () => {
   const early = { 3: [], 4: ["UTG"], 5: ["UTG", "CO"], 6: ["UTG", "HJ", "CO"],
     7: ["UTG", "UTG+1", "HJ", "CO"], 8: ["UTG", "UTG+1", "LJ", "HJ", "CO"],
     9: ["UTG", "UTG+1", "UTG+2", "LJ", "HJ", "CO"] };
@@ -141,11 +141,11 @@ test("2–9人按本手参局顺序显示中文盲位和庄位、UTG等位置，
       const sb = (dealer + 1) % count, bb = (dealer + 2) % count;
       const positions = seatPositions({ dealer, smallBlindSeat: sb, bigBlindSeat: bb,
         players: Array.from({ length: count }, (_, seatIndex) => ({ seatIndex, folded: seatIndex === 4 })) });
-      assert.equal(positions.get(dealer), "庄位"); assert.equal(positions.get(sb), "小盲"); assert.equal(positions.get(bb), "大盲");
+      assert.equal(positions.has(dealer), false); assert.equal(positions.has(sb), false); assert.equal(positions.has(bb), false);
       early[count].forEach((name, i) => assert.equal(positions.get((bb + 1 + i) % count), name));
     }
   }
-  assert.deepEqual([...seatPositions({ dealer: 2, players: [{ seatIndex: 2, position: "SB" }, { seatIndex: 7, position: "BB" }] })], [[2, "庄位/小盲"], [7, "大盲"]]);
+  assert.deepEqual([...seatPositions({ dealer: 2, players: [{ seatIndex: 2, position: "SB" }, { seatIndex: 7, position: "BB" }] })], []);
   const game = { dealer: 0, smallBlindSeat: 2, bigBlindSeat: 3,
     players: [0, 2, 3, 5, 8].map((seatIndex) => ({ seatIndex, folded: seatIndex === 5 })) };
   assert.equal(seatPositions(game).get(5), "UTG"); assert.equal(seatPositions(game).get(8), "CO");
@@ -190,4 +190,17 @@ test("下一手时间使用服务端截止；暂停、人数不足和过期时�
   assert.equal(nextHandState({ game, room: { status: "CLOSED" } }, now).visible, false);
   assert.equal(nextHandState({ game }, now, now + 10000).text, "结算展示 · 10s");
   assert.equal(nextHandState({ game }, now + 10000, now + 10000).text, "等待服务端开启下一手");
+});
+
+
+test("赢家牌型按参局玩家顺序映射稀疏座号，缺牌型不推测底牌", () => {
+  const game = { phase: "complete", players: [{ seatIndex: 7 }, { seatIndex: 2 }], result: { hands: ["同花", "一对"] } };
+  assert.equal(winningHandName(game, 7), "同花");
+  assert.equal(winningHandName(game, 2), "一对");
+  assert.equal(winningHandName({ ...game, phase: "river" }, 7), "");
+  assert.equal(winningHandName(game, 0), "");
+  for (const hands of [null, [], "同花"]) assert.equal(winningHandName({ ...game, result: { hands } }, 7), "牌型待公布");
+  const foldWin = { ...game, players: [{ seatIndex: 7 }, { seatIndex: 2, folded: true }], result: { hands: null } };
+  assert.equal(winningHandName(foldWin, 7), "其他玩家弃牌");
+  assert.equal(winningHandName({ ...foldWin, result: game.result }, 2), "");
 });

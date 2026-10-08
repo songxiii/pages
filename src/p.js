@@ -1,4 +1,4 @@
-import { createPokerTable, formatChips, safeAvatar, memberAmounts, memberStateText } from "./poker-table.js?v=20261007-check-countdown";
+import { createPokerTable, formatChips, safeAvatar, memberAmounts, memberStateText } from "./poker-table.js?v=20261008-winner-effects";
 import { POKER_API_BASE_URL } from "./poker-config.js";
 import { ticketFromLocation, ticketFragmentUrl, validateSettings, redactCredentials, normalizeWebSocketUrl } from "./poker-entry.js";
 import { roomEnded, sessionClock, settlementShowAt, settlementRows, settlementStats } from "./poker-session.js?v=20261004-host-start-timing";
@@ -409,7 +409,6 @@ function renderRoom() {
   text("room-title", view.activity?.title || room.name || "活动房间");
   text("room-status", room.timing?.status === "ENDING" ? "本手结束后结算" : room.playState === "PAUSED" ? "等待牌局继续" : room.playState === "RUNNING" && room.status === "WAITING" ? "等待下一手" : room.status === "WAITING" ? "等待开局" : room.status === "PLAYING" ? "牌局进行中" : room.status || "房间");
   text("room-member-count", number(counts.roomMemberCount));
-  text("online-count", number(counts.onlineCount));
   text("seated-count", number(counts.seatedCount));
   text("self-state", memberStateText(view, { ...self, ...own }));
   const list = $("room-settings");
@@ -451,8 +450,7 @@ function renderRoom() {
     const name = document.createElement("strong");
     name.textContent = member.nickname || "房间成员";
     const detail = document.createElement("small");
-    detail.textContent = memberStateText(view, member)
-      + " · " + (member.online ? "在线" : "离线");
+    detail.textContent = memberStateText(view, member);
     profile.append(name, detail);
     const balance = document.createElement("div");
     balance.className = "member-balance";
